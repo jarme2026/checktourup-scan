@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>checktourup</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://unpkg.com/html5-qrcode@2.3.7/html5-qrcode.min.js"></script>
 <style>
   :root{
     --paper: #FDF8E1;
@@ -301,9 +302,56 @@
   cursor:pointer;
 }
 
+
+/* ===== SCAN VERSION: ACCESS + BARCODE ===== */
+.access-overlay{
+  position:fixed; inset:0; z-index:20000; display:flex; align-items:center; justify-content:center;
+  background:rgba(30,28,20,.94); padding:20px;
+}
+.access-overlay.hidden{display:none}
+.access-card{
+  width:min(420px,100%); background:var(--card); border:1px solid var(--board-dark);
+  border-radius:10px; padding:24px; box-shadow:0 18px 50px rgba(0,0,0,.35);
+}
+.access-card h2{font-family:'Courier New',monospace;margin:0 0 8px;text-transform:uppercase}
+.access-card p{font-size:13px;color:var(--ink-soft);margin:0 0 16px}
+.access-card input{
+  width:100%; font-size:16px; padding:12px; border:1px solid var(--board-dark);
+  border-radius:6px; background:#fff; margin-bottom:10px;
+}
+.access-card button{width:100%;padding:12px;font-weight:700}
+.access-error{min-height:18px;color:var(--stamp-red);font-size:12px;margin-bottom:8px}
+
+.scan-toolbar{display:flex;gap:10px;margin:0 0 16px;align-items:center;flex-wrap:wrap}
+.scan-toolbar .btn.scan-primary{background:var(--stamp-green);color:#fff;border-color:var(--stamp-green)}
+.scan-last{font-family:'Courier New',monospace;font-size:12px;color:var(--ink-soft)}
+.scanner-panel{
+  display:none; position:fixed; top:0; left:0; right:0; width:100%; height:33vh;
+  min-height:180px; background:#000; overflow:hidden; z-index:15000;
+  box-shadow:0 6px 22px rgba(0,0,0,.35)
+}
+.scanner-panel.open{display:block}
+#reader{width:100%;height:100%}
+#reader video{width:100%!important;height:100%!important;object-fit:cover}
+.scanner-head{position:absolute;top:8px;left:10px;right:10px;display:flex;justify-content:flex-end;z-index:15002}
+.scanner-head .btn{min-height:36px;padding:7px 11px;background:rgba(0,0,0,.72);border-color:#fff;color:#fff}
+.scan-status{position:absolute;left:10px;right:10px;bottom:8px;padding:7px 10px;background:rgba(0,0,0,.72);color:#fff;border-radius:6px;font-size:12px;text-align:center;z-index:15002}
+@media(max-width:700px){.scan-toolbar .btn{width:auto;flex:1}.scan-last{width:100%}}
+
 </style>
 </head>
 <body>
+
+<div class="access-overlay" id="accessOverlay">
+  <div class="access-card" role="dialog" aria-modal="true">
+    <h2>Restricted access</h2>
+    <p>Enter the site password to continue.</p>
+    <input id="sitePasswordInput" type="password" autocomplete="current-password" placeholder="Password">
+    <div class="access-error" id="sitePasswordError"></div>
+    <button class="btn" id="sitePasswordBtn" type="button">Open site</button>
+  </div>
+</div>
+
 <div class="wrap">
   <svg class="clip" viewBox="0 0 140 46" xmlns="http://www.w3.org/2000/svg">
     <rect x="45" y="0" width="50" height="30" rx="8" fill="#8B8168"/>
@@ -347,8 +395,23 @@
           <label for="qtyColSelect">Quantity column (optional)</label>
           <select id="qtyColSelect"></select>
         </div>
+        <div class="field">
+          <label for="barcodeColSelect">Barcode / scan column</label>
+          <select id="barcodeColSelect"></select>
+        </div>
         <button class="btn danger" id="resetBtn">Clear all progress</button>
         <button class="btn" id="testReportBtn">Send test report now</button>
+      </div>
+
+      
+      <div class="scan-toolbar">
+        <button class="btn scan-primary" id="scanBarcodeBtn" type="button">Scan barcode</button>
+        <span class="scan-last" id="scanLastResult">Ready to scan.</span>
+      </div>
+      <div class="scanner-panel" id="scannerPanel">
+        <div class="scanner-head"><button class="btn" id="closeScannerBtn" type="button">Close camera</button></div>
+        <div id="reader"></div>
+        <div class="scan-status" id="scanStatus">Point the camera at one barcode.</div>
       </div>
 
       <div class="search-wrap">
@@ -480,6 +543,7 @@ let headers = [];
 let rows = [];
 let tickColIndex = -1;
 let qtyColIndex = -1;
+let barcodeColIndex = -1;
 let rowKeys = [];
 let allTicks = {};
 let allNotes = {};
@@ -497,6 +561,7 @@ const fileNameEl = document.getElementById('fileName');
 const rowCountEl = document.getElementById('rowCount');
 const colSelect = document.getElementById('colSelect');
 const qtyColSelect = document.getElementById('qtyColSelect');
+const barcodeColSelect = document.getElementById('barcodeColSelect');
 const resetBtn = document.getElementById('resetBtn');
 const changeFile = document.getElementById('changeFile');
 const progressLine = document.getElementById('progressLine');
@@ -623,55 +688,64 @@ async function applyParsedData(parsedHeaders, parsedRows, displayName){
   }
 }
 
-function setupColumnSelects(presetTickIndex, presetQtyIndex){
+function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex){
   colSelect.innerHTML = '';
-  qtyColSelect.innerHTML = '';
-
-  const noneOpt = document.createElement('option');
-  noneOpt.value = '-1';
-  noneOpt.textContent = '(none — always a checkbox)';
-  qtyColSelect.appendChild(noneOpt);
+  qtyColSelect.innerHTML = '<option value="-1">None</option>';
+  barcodeColSelect.innerHTML = '<option value="-1">Select barcode column</option>';
 
   headers.forEach((h, i) => {
-    const opt1 = document.createElement('option');
-    opt1.value = i;
-    opt1.textContent = h;
-    colSelect.appendChild(opt1);
+    const a = document.createElement('option');
+    a.value = i; a.textContent = h; colSelect.appendChild(a);
 
-    const opt2 = document.createElement('option');
-    opt2.value = i;
-    opt2.textContent = h;
-    qtyColSelect.appendChild(opt2);
+    const b = document.createElement('option');
+    b.value = i; b.textContent = h; qtyColSelect.appendChild(b);
+
+    const c = document.createElement('option');
+    c.value = i; c.textContent = h; barcodeColSelect.appendChild(c);
   });
 
-  if (typeof presetTickIndex === 'number'){
+  if (Number.isInteger(presetTickIndex) && presetTickIndex >= 0){
     tickColIndex = presetTickIndex;
   } else {
     const guessIdx = headers.findIndex(h => /check|tick|done|complete|status|ok\b/i.test(h));
     tickColIndex = guessIdx >= 0 ? guessIdx : headers.length - 1;
   }
-  colSelect.value = tickColIndex;
 
-  if (typeof presetQtyIndex === 'number'){
+  if (Number.isInteger(presetQtyIndex)){
     qtyColIndex = presetQtyIndex;
   } else {
     const qtyGuess = headers.findIndex(h => /qty|quantity|quant/i.test(h));
     qtyColIndex = qtyGuess >= 0 ? qtyGuess : -1;
   }
-  qtyColSelect.value = qtyColIndex;
+
+  if (Number.isInteger(presetBarcodeIndex)){
+    barcodeColIndex = presetBarcodeIndex;
+  } else {
+    const barcodeGuess = headers.findIndex(h =>
+      /barcode|bar code|scan code|scanner|sscc|transport unit|tu code|package code/i.test(h)
+    );
+    barcodeColIndex = barcodeGuess >= 0 ? barcodeGuess : -1;
+  }
+
+  colSelect.value = String(tickColIndex);
+  qtyColSelect.value = String(qtyColIndex);
+  barcodeColSelect.value = String(barcodeColIndex);
 
   colSelect.onchange = async () => {
     tickColIndex = parseInt(colSelect.value, 10);
-    const ok = await saveDataset();
-    if (ok) renderTable();
+    await saveDataset();
+    renderTable();
   };
   qtyColSelect.onchange = async () => {
     qtyColIndex = parseInt(qtyColSelect.value, 10);
-    const ok = await saveDataset();
-    if (ok) renderTable();
+    await saveDataset();
+    renderTable();
+  };
+  barcodeColSelect.onchange = async () => {
+    barcodeColIndex = parseInt(barcodeColSelect.value, 10);
+    await saveDataset();
   };
 }
-
 function hashRow(rowArr){
   const str = rowArr.map(c => String(c ?? '').trim().toLowerCase()).join('|');
   let h = 0;
@@ -726,7 +800,7 @@ async function saveDataset(){
     const res = await fetch('/api/dataset', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ headers, rows, tickColIndex, qtyColIndex })
+      body: JSON.stringify({ headers, rows, tickColIndex, qtyColIndex, barcodeColIndex })
     });
     if (!res.ok){
       alert('Could not save the sheet. Please try again.');
@@ -1268,10 +1342,11 @@ async function init(){
     if (isAdmin){
       fileNameEl.textContent = '(current sheet)';
       rowCountEl.textContent = rows.length;
-      setupColumnSelects(state.tickColIndex, state.qtyColIndex);
+      setupColumnSelects(state.tickColIndex, state.qtyColIndex, state.barcodeColIndex);
     } else {
       tickColIndex = state.tickColIndex;
       qtyColIndex = state.qtyColIndex;
+      barcodeColIndex = Number.isInteger(state.barcodeColIndex) ? state.barcodeColIndex : -1;
     }
     buildKeys();
     renderTable();
@@ -1282,12 +1357,195 @@ async function init(){
     emptyState.style.display = 'block';
   }
 }
+
+// =====================================================
+// PASSWORD ACCESS
+// Password is validated by the Worker against SITE_PASSWORD.
+// =====================================================
+async function ensureSiteAccess(){
+  const overlay = document.getElementById('accessOverlay');
+  const input = document.getElementById('sitePasswordInput');
+  const button = document.getElementById('sitePasswordBtn');
+  const error = document.getElementById('sitePasswordError');
+
+  try{
+    const status = await fetch('/auth/status', { credentials:'same-origin' });
+    if (status.ok){
+      overlay.classList.add('hidden');
+      return true;
+    }
+  }catch{}
+
+  return new Promise(resolve => {
+    const submit = async () => {
+      const password = input.value;
+      if (!password){ error.textContent = 'Enter the password.'; return; }
+      button.disabled = true;
+      error.textContent = '';
+      try{
+        const res = await fetch('/auth/login', {
+          method:'POST',
+          headers:{'content-type':'application/json'},
+          credentials:'same-origin',
+          body:JSON.stringify({password})
+        });
+        if (!res.ok){
+          error.textContent = 'Incorrect password.';
+          input.select();
+          return;
+        }
+        overlay.classList.add('hidden');
+        resolve(true);
+      }catch{
+        error.textContent = 'Could not connect. Try again.';
+      }finally{
+        button.disabled = false;
+      }
+    };
+    button.addEventListener('click', submit);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter'){ e.preventDefault(); submit(); }
+    });
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
+// =====================================================
+// BARCODE SCANNER
+// Reads one code, updates one matching row, then closes camera.
+// =====================================================
+let barcodeScanner = null;
+let barcodeScannerRunning = false;
+let barcodeScanLocked = false;
+
+function normalizeBarcode(value){
+  return String(value ?? '').trim().toUpperCase();
+}
+
+function findBarcodeRow(code){
+  if (barcodeColIndex < 0) return -1;
+  const target = normalizeBarcode(code);
+  if (!target) return -1;
+
+  const matches = [];
+  rows.forEach((row, index) => {
+    if (normalizeBarcode(row[barcodeColIndex]) === target) matches.push(index);
+  });
+  if (!matches.length) return -1;
+
+  // If the same code appears more than once, prefer the first incomplete row.
+  return matches.find(index => {
+    const expected = parseExpectedQty(rows[index]);
+    const current = allTicks[rowKeys[index]] ? Number(allTicks[rowKeys[index]].qty || 0) : 0;
+    return current < expected;
+  }) ?? matches[0];
+}
+
+async function applyBarcodeScan(rawCode){
+  const code = normalizeBarcode(rawCode);
+  const last = document.getElementById('scanLastResult');
+
+  if (barcodeColIndex < 0){
+    last.textContent = 'Select the Barcode / scan column in Admin first.';
+    return false;
+  }
+
+  const ri = findBarcodeRow(code);
+  if (ri < 0){
+    last.textContent = 'Not found: ' + code;
+    return false;
+  }
+
+  const key = rowKeys[ri];
+  const expected = parseExpectedQty(rows[ri]);
+  const current = allTicks[key] ? Number(allTicks[key].qty || 0) : 0;
+  const newQty = Math.min(expected, current + 1);
+
+  allTicks[key] = { ...(allTicks[key] || {}), qty:newQty };
+  renderTable();
+  updateProgress();
+
+  const result = await saveTickSet(key, allTicks[key], expected);
+  if (result && result.ticks) applyRemoteState(result.ticks);
+  if (result && result.allComplete) await maybeSendReport();
+
+  last.textContent = `${code} → ${newQty}/${expected}`;
+  return true;
+}
+
+async function startBarcodeScanner(){
+  if (barcodeScannerRunning) return;
+  const panel = document.getElementById('scannerPanel');
+  const status = document.getElementById('scanStatus');
+  const button = document.getElementById('scanBarcodeBtn');
+
+  if (barcodeColIndex < 0){
+    document.getElementById('scanLastResult').textContent =
+      'Barcode column is not configured. Open the admin link and select it.';
+    return;
+  }
+
+  barcodeScanLocked = false;
+  panel.classList.add('open');
+  status.textContent = 'Starting camera…';
+
+  try{
+    barcodeScanner = new Html5Qrcode('reader');
+    await barcodeScanner.start(
+      { facingMode:'environment' },
+      {
+        fps:15,
+        qrbox:(w,h)=>({width:Math.floor(w*.92),height:Math.floor(Math.min(h*.60,130))}),
+        aspectRatio:2.4,
+        disableFlip:false
+      },
+      async decoded => {
+        if (barcodeScanLocked) return;
+        barcodeScanLocked = true;
+        status.textContent = 'Scanned: ' + decoded;
+        await applyBarcodeScan(decoded);
+        await new Promise(r => setTimeout(r,120));
+        await stopBarcodeScanner();
+      },
+      () => {}
+    );
+    barcodeScannerRunning = true;
+    button.disabled = true;
+    status.textContent = 'Point the camera at one barcode.';
+  }catch(err){
+    console.error(err);
+    barcodeScannerRunning = false;
+    barcodeScanLocked = false;
+    button.disabled = false;
+    status.textContent = 'Camera could not start. Check camera permission.';
+  }
+}
+
+async function stopBarcodeScanner(){
+  const current = barcodeScanner;
+  barcodeScannerRunning = false;
+  barcodeScanner = null;
+  try{
+    if (current){ await current.stop(); current.clear(); }
+  }catch{}
+  document.getElementById('scanBarcodeBtn').disabled = false;
+  document.getElementById('scannerPanel').classList.remove('open');
+  document.getElementById('reader').innerHTML = '';
+}
+
+document.getElementById('scanBarcodeBtn').addEventListener('click', startBarcodeScanner);
+document.getElementById('closeScannerBtn').addEventListener('click', stopBarcodeScanner);
+window.addEventListener('pagehide', () => {
+  if (barcodeScannerRunning && barcodeScanner) barcodeScanner.stop().catch(()=>{});
+});
+
+
 // =====================================================
 // APP START
 // Always identify the checker before loading shared data.
 // =====================================================
 bindCheckerChangeButton();
-requestCheckerName(true).then(() => init());
+ensureSiteAccess().then(() => requestCheckerName(true)).then(() => init());
 </script>
 
 </body>
