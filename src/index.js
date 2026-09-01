@@ -1261,7 +1261,7 @@ export default {
       let body = {};
       try { body = await request.json(); } catch {}
 
-      if (String(body.password || "") !== String(env.SITE_PASSWORD)) {
+      if (String(body.password || "") !== const sitePassword = await env.SITE_PASSWORD.get();) {
         return json({ ok:false, error:"invalid password" }, 401);
       }
 
