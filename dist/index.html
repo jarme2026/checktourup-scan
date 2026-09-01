@@ -1390,8 +1390,20 @@ async function ensureSiteAccess(){
           body:JSON.stringify({password})
         });
         if (!res.ok){
-          error.textContent = 'Incorrect password.';
-          input.select();
+          let message = '';
+          try{
+            const data = await res.json();
+            message = String(data && data.error ? data.error : '');
+          }catch{}
+
+          if (res.status === 401){
+            error.textContent = 'Incorrect password.';
+            input.select();
+          }else if (res.status === 503){
+            error.textContent = 'Site password is not available in this deployment.';
+          }else{
+            error.textContent = message || 'Could not validate the password.';
+          }
           return;
         }
         overlay.classList.add('hidden');
