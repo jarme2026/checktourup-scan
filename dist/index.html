@@ -1392,6 +1392,9 @@ async function init(){
     } else {
       tickColIndex = state.tickColIndex;
       qtyColIndex = state.qtyColIndex;
+      barcodeColIndex = typeof state.barcodeColIndex === 'number'
+        ? state.barcodeColIndex
+        : -1;
     }
     buildKeys();
     renderTable();
