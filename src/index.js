@@ -610,6 +610,11 @@ export class ChecklistState {
               ? dataset.qtyColIndex
               : -1,
 
+          barcodeColIndex:
+            dataset
+              ? dataset.barcodeColIndex
+              : -1,
+
           ticks,
 
           notes,
@@ -664,7 +669,10 @@ export class ChecklistState {
               body.tickColIndex,
 
             qtyColIndex:
-              body.qtyColIndex
+              body.qtyColIndex,
+
+            barcodeColIndex:
+              body.barcodeColIndex
           }
         );
 
@@ -1207,61 +1215,89 @@ function json(
   );
 }
 
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map(b => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function readCookie(request, name) {
+  const cookie = request.headers.get("cookie") || "";
+  for (const part of cookie.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+    if (key === name) return rest.join("=");
+  }
+  return "";
+}
+
+async function expectedAccessToken(env) {
+  if (!env.SITE_PASSWORD) return "";
+  return await sha256Hex("checktour-access:" + env.SITE_PASSWORD);
+}
+
+async function hasSiteAccess(request, env) {
+  const expected = await expectedAccessToken(env);
+  if (!expected) return false;
+  return readCookie(request, "ct_access") === expected;
+}
+
 // =====================================================
 // MAIN WORKER
 // =====================================================
 
 export default {
-  async fetch(
-    request,
-    env,
-    ctx
-  ) {
-    const url =
-      new URL(
-        request.url
-      );
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
 
-    if (
-      url.pathname.startsWith(
-        "/api/"
-      )
-    ) {
-      const id =
-        env.CHECKLIST.idFromName(
-          "singleton"
-        );
+    // Password login endpoint.
+    if (url.pathname === "/auth/login" && request.method === "POST") {
+      if (!env.SITE_PASSWORD) {
+        return json({ ok:false, error:"SITE_PASSWORD secret is not configured" }, 503);
+      }
 
-      const stub =
-        env.CHECKLIST.get(
-          id
-        );
+      let body = {};
+      try { body = await request.json(); } catch {}
 
-      const forwardUrl =
-        new URL(
-          request.url
-        );
+      if (String(body.password || "") !== String(env.SITE_PASSWORD)) {
+        return json({ ok:false, error:"invalid password" }, 401);
+      }
 
-      forwardUrl.pathname =
-        url.pathname.slice(
-          "/api".length
-        )
-        ||
-        "/";
-
-      const forwardReq =
-        new Request(
-          forwardUrl.toString(),
-          request
-        );
-
-      return stub.fetch(
-        forwardReq
-      );
+      const token = await expectedAccessToken(env);
+      return new Response(JSON.stringify({ ok:true }), {
+        status:200,
+        headers:{
+          "content-type":"application/json",
+          "set-cookie":`ct_access=${token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800`
+        }
+      });
     }
 
-    // The checker selection now lives directly in dist/index.html.
-    // No checker-prompt.js injection is needed.
+    if (url.pathname === "/auth/status") {
+      return (await hasSiteAccess(request, env))
+        ? json({ ok:true })
+        : json({ ok:false }, 401);
+    }
+
+    // All API calls require a valid site session.
+    if (url.pathname.startsWith("/api/")) {
+      if (!(await hasSiteAccess(request, env))) {
+        return json({ ok:false, error:"unauthorized" }, 401);
+      }
+
+      const id = env.CHECKLIST.idFromName("singleton");
+      const stub = env.CHECKLIST.get(id);
+
+      const forwardUrl = new URL(request.url);
+      forwardUrl.pathname = url.pathname.slice("/api".length) || "/";
+      const forwardReq = new Request(forwardUrl.toString(), request);
+      return stub.fetch(forwardReq);
+    }
+
+    // The HTML loads first so it can display the password screen.
+    // Checklist data remains inaccessible until authentication succeeds.
     return env.ASSETS.fetch(request);
   }
 };
