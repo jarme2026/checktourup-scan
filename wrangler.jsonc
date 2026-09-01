@@ -2,9 +2,17 @@
   "name": "checktourup-scan",
   "compatibility_date": "2026-07-15",
   "main": "src/index.js",
+
   "vars": {
     "REPORT_RECIPIENTS": "jarme@boconcept.com"
   },
+
+  "secrets": {
+    "required": [
+      "SITE_PASSWORD"
+    ]
+  },
+
   "secrets_store_secrets": [
     {
       "binding": "RESEND_API_KEY",
@@ -12,11 +20,13 @@
       "secret_name": "resend-api-key"
     }
   ],
+
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application"
   },
+
   "durable_objects": {
     "bindings": [
       {
@@ -25,6 +35,7 @@
       }
     ]
   },
+
   "migrations": [
     {
       "tag": "v1",
