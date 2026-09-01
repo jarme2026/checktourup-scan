@@ -303,52 +303,77 @@
 }
 
 
-/* ===== SCAN VERSION: ACCESS + BARCODE ===== */
-.access-overlay{
-  position:fixed; inset:0; z-index:20000; display:flex; align-items:center; justify-content:center;
-  background:rgba(30,28,20,.94); padding:20px;
+/* ===== PASSWORD + BARCODE SCANNER (keeps original Checktour layout) ===== */
+#siteAccessOverlay{
+  position:fixed; inset:0; z-index:200000; display:flex; align-items:center; justify-content:center;
+  padding:18px; background:rgba(30,25,15,.72); backdrop-filter:blur(3px);
 }
-.access-overlay.hidden{display:none}
-.access-card{
-  width:min(420px,100%); background:var(--card); border:1px solid var(--board-dark);
-  border-radius:10px; padding:24px; box-shadow:0 18px 50px rgba(0,0,0,.35);
+#siteAccessOverlay.hidden{display:none}
+.site-access-card{
+  width:min(100%,400px); background:#FFFEFA; color:#2E2A22;
+  border:1px solid #8B8168; border-radius:12px; padding:22px;
+  box-shadow:0 18px 50px rgba(0,0,0,.28);
 }
-.access-card h2{font-family:'Courier New',monospace;margin:0 0 8px;text-transform:uppercase}
-.access-card p{font-size:13px;color:var(--ink-soft);margin:0 0 16px}
-.access-card input{
-  width:100%; font-size:16px; padding:12px; border:1px solid var(--board-dark);
-  border-radius:6px; background:#fff; margin-bottom:10px;
+.site-access-card h2{margin:0 0 8px;font:700 20px 'Courier New',monospace}
+.site-access-card p{margin:0 0 16px;color:#6B6353;font-size:14px;line-height:1.4}
+.site-access-card input{
+  width:100%; padding:12px; margin-bottom:10px; border:1px solid #8B8168;
+  border-radius:7px; background:#fff; color:#2E2A22; font:inherit; font-size:16px;
 }
-.access-card button{width:100%;padding:12px;font-weight:700}
-.access-error{min-height:18px;color:var(--stamp-red);font-size:12px;margin-bottom:8px}
+.site-access-error{min-height:18px;margin:-2px 0 8px;color:#A94438;font-size:12px}
+.site-access-card button{
+  width:100%; min-height:44px; border:1px solid #2F6B4F; border-radius:7px;
+  background:#2F6B4F; color:#fff; font:inherit; font-weight:700; cursor:pointer;
+}
 
-.scan-toolbar{display:flex;gap:10px;margin:0 0 16px;align-items:center;flex-wrap:wrap}
-.scan-toolbar .btn.scan-primary{background:var(--stamp-green);color:#fff;border-color:var(--stamp-green)}
-.scan-last{font-family:'Courier New',monospace;font-size:12px;color:var(--ink-soft)}
-.scanner-panel{
-  display:none; position:fixed; top:0; left:0; right:0; width:100%; height:33vh;
-  min-height:180px; background:#000; overflow:hidden; z-index:15000;
-  box-shadow:0 6px 22px rgba(0,0,0,.35)
+.barcode-tools{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 16px;
 }
-.scanner-panel.open{display:block}
-#reader{width:100%;height:100%}
-#reader video{width:100%!important;height:100%!important;object-fit:cover}
-.scanner-head{position:absolute;top:8px;left:10px;right:10px;display:flex;justify-content:flex-end;z-index:15002}
-.scanner-head .btn{min-height:36px;padding:7px 11px;background:rgba(0,0,0,.72);border-color:#fff;color:#fff}
-.scan-status{position:absolute;left:10px;right:10px;bottom:8px;padding:7px 10px;background:rgba(0,0,0,.72);color:#fff;border-radius:6px;font-size:12px;text-align:center;z-index:15002}
-@media(max-width:700px){.scan-toolbar .btn{width:auto;flex:1}.scan-last{width:100%}}
+.barcode-tools .btn.scan-btn{
+  border-color:var(--stamp-green); background:var(--stamp-green); color:#fff;
+}
+.barcode-tools .btn.scan-btn:hover{background:#275a43}
+#barcodeLastResult{
+  font-family:'Courier New',monospace; font-size:12px; color:var(--ink-soft);
+}
+#barcodeScannerPanel{
+  display:none; position:fixed; inset:0; z-index:150000; background:rgba(0,0,0,.86);
+  align-items:flex-start; justify-content:center; padding-top:0;
+}
+#barcodeScannerPanel.open{display:flex}
+.barcode-camera-wrap{
+  position:relative; width:100%; height:33vh; min-height:190px; background:#000;
+  box-shadow:0 8px 28px rgba(0,0,0,.45);
+}
+#barcodeReader{width:100%;height:100%}
+#barcodeReader video{width:100%!important;height:100%!important;object-fit:cover}
+.barcode-camera-actions{
+  position:absolute; top:8px; right:8px; z-index:150002;
+}
+.barcode-camera-actions .btn{
+  width:auto; background:rgba(0,0,0,.72); color:#fff; border-color:#fff;
+}
+#barcodeScanStatus{
+  position:absolute; left:10px; right:10px; bottom:8px; z-index:150002;
+  padding:7px 10px; border-radius:6px; background:rgba(0,0,0,.72);
+  color:#fff; text-align:center; font-size:12px;
+}
+@media(max-width:700px){
+  .barcode-tools .btn{width:auto;flex:1}
+  #barcodeLastResult{width:100%}
+}
 
 </style>
 </head>
 <body>
 
-<div class="access-overlay" id="accessOverlay">
-  <div class="access-card" role="dialog" aria-modal="true">
-    <h2>Restricted access</h2>
+<div id="siteAccessOverlay">
+  <div class="site-access-card" role="dialog" aria-modal="true" aria-labelledby="siteAccessTitle">
+    <h2 id="siteAccessTitle">RESTRICTED ACCESS</h2>
     <p>Enter the site password to continue.</p>
     <input id="sitePasswordInput" type="password" autocomplete="current-password" placeholder="Password">
-    <div class="access-error" id="sitePasswordError"></div>
-    <button class="btn" id="sitePasswordBtn" type="button">Open site</button>
+    <div class="site-access-error" id="sitePasswordError"></div>
+    <button id="sitePasswordBtn" type="button">Open site</button>
   </div>
 </div>
 
@@ -396,22 +421,26 @@
           <select id="qtyColSelect"></select>
         </div>
         <div class="field">
-          <label for="barcodeColSelect">Barcode / scan column</label>
+          <label for="barcodeColSelect">Barcode column</label>
           <select id="barcodeColSelect"></select>
         </div>
         <button class="btn danger" id="resetBtn">Clear all progress</button>
         <button class="btn" id="testReportBtn">Send test report now</button>
       </div>
 
-      
-      <div class="scan-toolbar">
-        <button class="btn scan-primary" id="scanBarcodeBtn" type="button">Scan barcode</button>
-        <span class="scan-last" id="scanLastResult">Ready to scan.</span>
+
+      <div class="barcode-tools">
+        <button class="btn scan-btn" id="scanBarcodeBtn" type="button">Scan barcode</button>
+        <span id="barcodeLastResult">Ready to scan.</span>
       </div>
-      <div class="scanner-panel" id="scannerPanel">
-        <div class="scanner-head"><button class="btn" id="closeScannerBtn" type="button">Close camera</button></div>
-        <div id="reader"></div>
-        <div class="scan-status" id="scanStatus">Point the camera at one barcode.</div>
+      <div id="barcodeScannerPanel">
+        <div class="barcode-camera-wrap">
+          <div class="barcode-camera-actions">
+            <button class="btn" id="closeBarcodeScannerBtn" type="button">Close</button>
+          </div>
+          <div id="barcodeReader"></div>
+          <div id="barcodeScanStatus">Point the camera at one barcode.</div>
+        </div>
       </div>
 
       <div class="search-wrap">
@@ -690,57 +719,74 @@ async function applyParsedData(parsedHeaders, parsedRows, displayName){
 
 function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex){
   colSelect.innerHTML = '';
-  qtyColSelect.innerHTML = '<option value="-1">None</option>';
-  barcodeColSelect.innerHTML = '<option value="-1">Select barcode column</option>';
+  qtyColSelect.innerHTML = '';
+  barcodeColSelect.innerHTML = '';
+
+  const noneQtyOpt = document.createElement('option');
+  noneQtyOpt.value = '-1';
+  noneQtyOpt.textContent = '(none — always a checkbox)';
+  qtyColSelect.appendChild(noneQtyOpt);
+
+  const noneBarcodeOpt = document.createElement('option');
+  noneBarcodeOpt.value = '-1';
+  noneBarcodeOpt.textContent = '(select barcode column)';
+  barcodeColSelect.appendChild(noneBarcodeOpt);
 
   headers.forEach((h, i) => {
-    const a = document.createElement('option');
-    a.value = i; a.textContent = h; colSelect.appendChild(a);
+    const opt1 = document.createElement('option');
+    opt1.value = i;
+    opt1.textContent = h;
+    colSelect.appendChild(opt1);
 
-    const b = document.createElement('option');
-    b.value = i; b.textContent = h; qtyColSelect.appendChild(b);
+    const opt2 = document.createElement('option');
+    opt2.value = i;
+    opt2.textContent = h;
+    qtyColSelect.appendChild(opt2);
 
-    const c = document.createElement('option');
-    c.value = i; c.textContent = h; barcodeColSelect.appendChild(c);
+    const opt3 = document.createElement('option');
+    opt3.value = i;
+    opt3.textContent = h;
+    barcodeColSelect.appendChild(opt3);
   });
 
-  if (Number.isInteger(presetTickIndex) && presetTickIndex >= 0){
+  if (typeof presetTickIndex === 'number'){
     tickColIndex = presetTickIndex;
   } else {
     const guessIdx = headers.findIndex(h => /check|tick|done|complete|status|ok\b/i.test(h));
     tickColIndex = guessIdx >= 0 ? guessIdx : headers.length - 1;
   }
+  colSelect.value = tickColIndex;
 
-  if (Number.isInteger(presetQtyIndex)){
+  if (typeof presetQtyIndex === 'number'){
     qtyColIndex = presetQtyIndex;
   } else {
     const qtyGuess = headers.findIndex(h => /qty|quantity|quant/i.test(h));
     qtyColIndex = qtyGuess >= 0 ? qtyGuess : -1;
   }
+  qtyColSelect.value = qtyColIndex;
 
-  if (Number.isInteger(presetBarcodeIndex)){
+  if (typeof presetBarcodeIndex === 'number'){
     barcodeColIndex = presetBarcodeIndex;
   } else {
     const barcodeGuess = headers.findIndex(h =>
-      /barcode|bar code|scan code|scanner|sscc|transport unit|tu code|package code/i.test(h)
+      /barcode|bar code|scan code|scanner|sscc|transport unit|tu code|package code|link code/i.test(h)
     );
     barcodeColIndex = barcodeGuess >= 0 ? barcodeGuess : -1;
   }
-
-  colSelect.value = String(tickColIndex);
-  qtyColSelect.value = String(qtyColIndex);
-  barcodeColSelect.value = String(barcodeColIndex);
+  barcodeColSelect.value = barcodeColIndex;
 
   colSelect.onchange = async () => {
     tickColIndex = parseInt(colSelect.value, 10);
-    await saveDataset();
-    renderTable();
+    const ok = await saveDataset();
+    if (ok) renderTable();
   };
+
   qtyColSelect.onchange = async () => {
     qtyColIndex = parseInt(qtyColSelect.value, 10);
-    await saveDataset();
-    renderTable();
+    const ok = await saveDataset();
+    if (ok) renderTable();
   };
+
   barcodeColSelect.onchange = async () => {
     barcodeColIndex = parseInt(barcodeColSelect.value, 10);
     await saveDataset();
@@ -1346,7 +1392,6 @@ async function init(){
     } else {
       tickColIndex = state.tickColIndex;
       qtyColIndex = state.qtyColIndex;
-      barcodeColIndex = Number.isInteger(state.barcodeColIndex) ? state.barcodeColIndex : -1;
     }
     buildKeys();
     renderTable();
@@ -1359,11 +1404,11 @@ async function init(){
 }
 
 // =====================================================
-// PASSWORD ACCESS
-// Password is validated by the Worker against SITE_PASSWORD.
+// SITE PASSWORD
+// SITE_PASSWORD comes from Cloudflare Secrets Store.
 // =====================================================
 async function ensureSiteAccess(){
-  const overlay = document.getElementById('accessOverlay');
+  const overlay = document.getElementById('siteAccessOverlay');
   const input = document.getElementById('sitePasswordInput');
   const button = document.getElementById('sitePasswordBtn');
   const error = document.getElementById('sitePasswordError');
@@ -1379,9 +1424,14 @@ async function ensureSiteAccess(){
   return new Promise(resolve => {
     const submit = async () => {
       const password = input.value;
-      if (!password){ error.textContent = 'Enter the password.'; return; }
+      if (!password){
+        error.textContent = 'Enter the password.';
+        return;
+      }
+
       button.disabled = true;
       error.textContent = '';
+
       try{
         const res = await fetch('/auth/login', {
           method:'POST',
@@ -1389,23 +1439,19 @@ async function ensureSiteAccess(){
           credentials:'same-origin',
           body:JSON.stringify({password})
         });
-        if (!res.ok){
-          let message = '';
-          try{
-            const data = await res.json();
-            message = String(data && data.error ? data.error : '');
-          }catch{}
 
+        if (!res.ok){
           if (res.status === 401){
             error.textContent = 'Incorrect password.';
             input.select();
           }else if (res.status === 503){
             error.textContent = 'Site password is not available in this deployment.';
           }else{
-            error.textContent = message || 'Could not validate the password.';
+            error.textContent = 'Could not validate the password.';
           }
           return;
         }
+
         overlay.classList.add('hidden');
         resolve(true);
       }catch{
@@ -1414,9 +1460,13 @@ async function ensureSiteAccess(){
         button.disabled = false;
       }
     };
+
     button.addEventListener('click', submit);
     input.addEventListener('keydown', e => {
-      if (e.key === 'Enter'){ e.preventDefault(); submit(); }
+      if (e.key === 'Enter'){
+        e.preventDefault();
+        submit();
+      }
     });
     setTimeout(() => input.focus(), 50);
   });
@@ -1424,7 +1474,8 @@ async function ensureSiteAccess(){
 
 // =====================================================
 // BARCODE SCANNER
-// Reads one code, updates one matching row, then closes camera.
+// Same Checktour checklist; scanner is only an alternate way to tick a row.
+// Manual checkbox/quantity controls remain fully available.
 // =====================================================
 let barcodeScanner = null;
 let barcodeScannerRunning = false;
@@ -1434,66 +1485,85 @@ function normalizeBarcode(value){
   return String(value ?? '').trim().toUpperCase();
 }
 
-function findBarcodeRow(code){
+function findRowByBarcode(decodedText){
   if (barcodeColIndex < 0) return -1;
-  const target = normalizeBarcode(code);
+  const target = normalizeBarcode(decodedText);
   if (!target) return -1;
 
   const matches = [];
   rows.forEach((row, index) => {
-    if (normalizeBarcode(row[barcodeColIndex]) === target) matches.push(index);
+    if (normalizeBarcode(row[barcodeColIndex]) === target){
+      matches.push(index);
+    }
   });
+
   if (!matches.length) return -1;
 
-  // If the same code appears more than once, prefer the first incomplete row.
-  return matches.find(index => {
+  // If the same barcode appears more than once, prefer a row that is not complete.
+  const incomplete = matches.find(index => {
     const expected = parseExpectedQty(rows[index]);
-    const current = allTicks[rowKeys[index]] ? Number(allTicks[rowKeys[index]].qty || 0) : 0;
+    const tick = allTicks[rowKeys[index]];
+    const current = tick ? Number(tick.qty || 0) : 0;
     return current < expected;
-  }) ?? matches[0];
+  });
+
+  return incomplete ?? matches[0];
 }
 
-async function applyBarcodeScan(rawCode){
-  const code = normalizeBarcode(rawCode);
-  const last = document.getElementById('scanLastResult');
+async function applyBarcodeToChecklist(decodedText){
+  const resultLabel = document.getElementById('barcodeLastResult');
+  const code = normalizeBarcode(decodedText);
 
   if (barcodeColIndex < 0){
-    last.textContent = 'Select the Barcode / scan column in Admin first.';
+    resultLabel.textContent = 'Barcode column is not configured. Use the admin link to select it.';
     return false;
   }
 
-  const ri = findBarcodeRow(code);
-  if (ri < 0){
-    last.textContent = 'Not found: ' + code;
+  const rowIndex = findRowByBarcode(code);
+  if (rowIndex < 0){
+    resultLabel.textContent = 'Code not found: ' + code;
     return false;
   }
 
-  const key = rowKeys[ri];
-  const expected = parseExpectedQty(rows[ri]);
-  const current = allTicks[key] ? Number(allTicks[key].qty || 0) : 0;
-  const newQty = Math.min(expected, current + 1);
+  const key = rowKeys[rowIndex];
+  const expected = parseExpectedQty(rows[rowIndex]);
+  const existing = allTicks[key] || {};
+  const current = Number(existing.qty || 0);
 
-  allTicks[key] = { ...(allTicks[key] || {}), qty:newQty };
+  // Scanner behaves like the existing checklist:
+  // checkbox row -> complete it; quantity row -> add one unit per scan.
+  const newQty = qtyColIndex >= 0
+    ? Math.min(expected, current + 1)
+    : 1;
+
+  const response = await saveTickSet(key, { ...existing, qty:newQty }, expected);
+
+  if (!response){
+    resultLabel.textContent = 'Could not save scan: ' + code;
+    return false;
+  }
+
+  if (response.ticks) allTicks = response.ticks;
   renderTable();
   updateProgress();
 
-  const result = await saveTickSet(key, allTicks[key], expected);
-  if (result && result.ticks) applyRemoteState(result.ticks);
-  if (result && result.allComplete) await maybeSendReport();
+  if (response.allComplete){
+    await maybeSendReport();
+  }
 
-  last.textContent = `${code} → ${newQty}/${expected}`;
+  resultLabel.textContent = `${code} → ${newQty}/${expected}`;
   return true;
 }
 
 async function startBarcodeScanner(){
   if (barcodeScannerRunning) return;
-  const panel = document.getElementById('scannerPanel');
-  const status = document.getElementById('scanStatus');
-  const button = document.getElementById('scanBarcodeBtn');
+
+  const panel = document.getElementById('barcodeScannerPanel');
+  const status = document.getElementById('barcodeScanStatus');
 
   if (barcodeColIndex < 0){
-    document.getElementById('scanLastResult').textContent =
-      'Barcode column is not configured. Open the admin link and select it.';
+    document.getElementById('barcodeLastResult').textContent =
+      'Barcode column is not configured. Use the admin link to select it.';
     return;
   }
 
@@ -1502,53 +1572,65 @@ async function startBarcodeScanner(){
   status.textContent = 'Starting camera…';
 
   try{
-    barcodeScanner = new Html5Qrcode('reader');
+    barcodeScanner = new Html5Qrcode('barcodeReader');
+
     await barcodeScanner.start(
       { facingMode:'environment' },
       {
         fps:15,
-        qrbox:(w,h)=>({width:Math.floor(w*.92),height:Math.floor(Math.min(h*.60,130))}),
+        qrbox:(w,h)=>({
+          width:Math.floor(w * 0.92),
+          height:Math.floor(Math.min(h * 0.60, 130))
+        }),
         aspectRatio:2.4,
         disableFlip:false
       },
-      async decoded => {
+      async decodedText => {
         if (barcodeScanLocked) return;
         barcodeScanLocked = true;
-        status.textContent = 'Scanned: ' + decoded;
-        await applyBarcodeScan(decoded);
-        await new Promise(r => setTimeout(r,120));
+
+        status.textContent = 'Scanned: ' + decodedText;
+        await applyBarcodeToChecklist(decodedText);
         await stopBarcodeScanner();
       },
       () => {}
     );
+
     barcodeScannerRunning = true;
-    button.disabled = true;
     status.textContent = 'Point the camera at one barcode.';
   }catch(err){
-    console.error(err);
+    console.error('Could not start barcode scanner', err);
     barcodeScannerRunning = false;
-    barcodeScanLocked = false;
-    button.disabled = false;
-    status.textContent = 'Camera could not start. Check camera permission.';
+    barcodeScanner = null;
+    panel.classList.remove('open');
+    document.getElementById('barcodeLastResult').textContent =
+      'Camera could not start. Check camera permission.';
   }
 }
 
 async function stopBarcodeScanner(){
   const current = barcodeScanner;
-  barcodeScannerRunning = false;
   barcodeScanner = null;
+  barcodeScannerRunning = false;
+
   try{
-    if (current){ await current.stop(); current.clear(); }
+    if (current){
+      await current.stop();
+      current.clear();
+    }
   }catch{}
-  document.getElementById('scanBarcodeBtn').disabled = false;
-  document.getElementById('scannerPanel').classList.remove('open');
-  document.getElementById('reader').innerHTML = '';
+
+  document.getElementById('barcodeScannerPanel').classList.remove('open');
+  document.getElementById('barcodeReader').innerHTML = '';
 }
 
 document.getElementById('scanBarcodeBtn').addEventListener('click', startBarcodeScanner);
-document.getElementById('closeScannerBtn').addEventListener('click', stopBarcodeScanner);
+document.getElementById('closeBarcodeScannerBtn').addEventListener('click', stopBarcodeScanner);
+
 window.addEventListener('pagehide', () => {
-  if (barcodeScannerRunning && barcodeScanner) barcodeScanner.stop().catch(()=>{});
+  if (barcodeScannerRunning && barcodeScanner){
+    barcodeScanner.stop().catch(() => {});
+  }
 });
 
 
