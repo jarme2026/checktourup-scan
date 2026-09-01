@@ -1233,9 +1233,29 @@ function readCookie(request, name) {
   return "";
 }
 
+async function getSitePassword(env) {
+  const binding = env.SITE_PASSWORD;
+
+  if (!binding) {
+    return "";
+  }
+
+  if (typeof binding.get === "function") {
+    const value = await binding.get();
+    return String(value || "");
+  }
+
+  if (typeof binding === "string") {
+    return binding;
+  }
+
+  return "";
+}
+
 async function expectedAccessToken(env) {
-  if (!env.SITE_PASSWORD) return "";
-  return await sha256Hex("checktour-access:" + env.SITE_PASSWORD);
+  const sitePassword = await getSitePassword(env);
+  if (!sitePassword) return "";
+  return await sha256Hex("checktour-access:" + sitePassword);
 }
 
 async function hasSiteAccess(request, env) {
@@ -1254,14 +1274,16 @@ export default {
 
     // Password login endpoint.
     if (url.pathname === "/auth/login" && request.method === "POST") {
-      if (!env.SITE_PASSWORD) {
+      const sitePassword = await getSitePassword(env);
+
+      if (!sitePassword) {
         return json({ ok:false, error:"SITE_PASSWORD secret is not configured" }, 503);
       }
 
       let body = {};
       try { body = await request.json(); } catch {}
 
-      if (String(body.password || "") !== const sitePassword = await env.SITE_PASSWORD.get();) {
+      if (String(body.password || "") !== sitePassword) {
         return json({ ok:false, error:"invalid password" }, 401);
       }
 
