@@ -367,96 +367,8 @@
 #hardwareScannerStatus.error{color:var(--stamp-red);font-weight:600}
 
 
-.webusb-mobile-box{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
-  width:100%;
-  margin-top:8px;
-  padding:10px;
-  border:1px solid var(--paper-line);
-  border-radius:8px;
-  background:var(--card);
-}
-.webusb-actions{
-  display:flex;
-  gap:8px;
-  flex-wrap:wrap;
-}
-#connectUsbScannerBtn{
-  font-weight:700;
-  border-color:var(--stamp-green);
-  color:var(--stamp-green);
-}
-#disconnectUsbScannerBtn{
-  display:none;
-}
-#webUsbStatus{
-  font-size:12px;
-  line-height:1.35;
-  color:var(--ink-soft);
-  word-break:break-word;
-}
-#webUsbStatus.ok{color:var(--stamp-green);font-weight:600}
-#webUsbStatus.error{color:var(--stamp-red);font-weight:600}
-#webUsbDiag{
-  font-family:'Courier New',monospace;
-  font-size:11px;
-  line-height:1.35;
-  white-space:pre-wrap;
-  word-break:break-word;
-  max-height:150px;
-  overflow:auto;
-  padding:7px 8px;
-  border:1px dashed var(--paper-line);
-  border-radius:6px;
-  background:rgba(0,0,0,.02);
-  display:none;
-}
-
 @media (max-width:700px){
-  .mobile-usb-dock{
-    position:fixed;
-    left:8px;
-    right:8px;
-    bottom:10px;
-    z-index:9998;
-    display:flex;
-    gap:8px;
-    align-items:center;
-    padding:10px;
-    border:1px solid var(--board-dark);
-    border-radius:10px;
-    background:var(--card);
-    box-shadow:0 6px 24px rgba(0,0,0,.18);
-  }
-  .mobile-usb-dock .btn{
-    flex:1 1 auto;
-    width:auto;
-    margin:0;
-  }
-  #mobileUsbStatus{
-    flex:2 1 auto;
-    font-size:11px;
-    line-height:1.2;
-    color:var(--ink-soft);
-    overflow:hidden;
-    text-overflow:ellipsis;
-    white-space:nowrap;
-  }
-  #mobileUsbStatus.ok{color:var(--stamp-green);font-weight:700}
-  #mobileUsbStatus.error{color:var(--stamp-red);font-weight:700}
-  body{ padding-bottom:110px !important; }
-}
-@media (min-width:701px){
-  .mobile-usb-dock{ display:none; }
-}
-
-@media (max-width:700px){
-  .webusb-mobile-box{
-    display:flex;
-  }
-  .webusb-actions .btn{
+    .webusb-actions .btn{
     flex:1 1 140px;
     width:auto;
   }
@@ -466,6 +378,43 @@
   }
   #hardwareScannerStatus{
     display:none;
+  }
+}
+
+
+.usb-footer{
+  margin-top:24px;
+  padding-top:18px;
+  border-top:1px solid var(--paper-line);
+  text-align:center;
+}
+#connectUsbScannerBtn{
+  width:100%;
+  max-width:420px;
+  padding:13px 18px;
+  font-weight:700;
+  border-color:var(--stamp-green);
+  color:var(--stamp-green);
+}
+#connectUsbScannerBtn.connected{
+  background:var(--stamp-green-bg);
+}
+#webUsbStatus{
+  margin-top:8px;
+  font-size:12px;
+  color:var(--ink-soft);
+  line-height:1.35;
+}
+#webUsbStatus.ok{color:var(--stamp-green);font-weight:600}
+#webUsbStatus.error{color:var(--stamp-red);font-weight:600}
+@media (max-width:700px){
+  #hardwareScanInput,
+  #focusHardwareScannerBtn,
+  #hardwareScannerStatus{
+    display:none !important;
+  }
+  .usb-footer{
+    margin-top:18px;
   }
 }
 
@@ -579,14 +528,6 @@
           <button class="btn" id="focusHardwareScannerBtn" type="button">USB scanner</button>
           <div id="hardwareScannerStatus" class="ready">Keyboard-HID scanner ready (desktop/fallback).</div>
         </div>
-        <div class="webusb-mobile-box">
-          <div class="webusb-actions">
-            <button class="btn" id="connectUsbScannerBtn" type="button">Connect USB scanner</button>
-            <button class="btn" id="disconnectUsbScannerBtn" type="button">Disconnect USB</button>
-            <button class="btn" id="toggleUsbDiagBtn" type="button">USB diagnostic</button>
-          </div>
-          <div id="webUsbStatus">Direct USB: not connected.</div>
-          <div id="webUsbDiag"></div>
         </div>
       </div>
       <div id="barcodeScannerPanel">
@@ -615,6 +556,11 @@
 
       <div class="table-scroll">
         <table id="dataTable"></table>
+      </div>
+
+      <div class="usb-footer" id="usbFooter">
+        <button class="btn" id="connectUsbScannerBtn" type="button">Connect scanner</button>
+        <div id="webUsbStatus">Scanner not connected.</div>
       </div>
     </div>
 
@@ -2115,10 +2061,7 @@ if (afterUploadForHardware){
 const DATALOGIC_VENDOR_ID = 0x05F9;
 
 const connectUsbScannerBtn = document.getElementById('connectUsbScannerBtn');
-const disconnectUsbScannerBtn = document.getElementById('disconnectUsbScannerBtn');
-const toggleUsbDiagBtn = document.getElementById('toggleUsbDiagBtn');
 const webUsbStatus = document.getElementById('webUsbStatus');
-const webUsbDiag = document.getElementById('webUsbDiag');
 
 let directUsbDevice = null;
 let directUsbInterfaceNumber = null;
@@ -2136,16 +2079,7 @@ function setWebUsbStatus(message, type=''){
   if (type) webUsbStatus.classList.add(type);
 }
 
-function appendUsbDiag(message){
-  if (!webUsbDiag) return;
-  const stamp = new Date().toLocaleTimeString();
-  webUsbDiag.textContent += '[' + stamp + '] ' + message + '\n';
-  webUsbDiag.scrollTop = webUsbDiag.scrollHeight;
-}
-
-function hex4(n){
-  return '0x' + Number(n || 0).toString(16).toUpperCase().padStart(4,'0');
-}
+function appendUsbDiag(message){ console.debug('[USB]', message); }
 
 function describeUsbDevice(device){
   if (!device) return 'No device';
@@ -2364,6 +2298,8 @@ async function disconnectDirectUsbScanner(){
   }
 
   const device = directUsbDevice;
+  const interfaceNumber = directUsbInterfaceNumber;
+
   directUsbDevice = null;
   directUsbInterfaceNumber = null;
   directUsbEndpointIn = null;
@@ -2371,85 +2307,108 @@ async function disconnectDirectUsbScanner(){
 
   if (device){
     try{
-      if (device.opened && directUsbInterfaceNumber !== null){
-        try{ await device.releaseInterface(directUsbInterfaceNumber); }catch{}
+      if (device.opened && interfaceNumber !== null){
+        try{ await device.releaseInterface(interfaceNumber); }catch{}
       }
       if (device.opened) await device.close();
     }catch{}
   }
 
-  if (disconnectUsbScannerBtn) disconnectUsbScannerBtn.style.display = 'none';
-  if (connectUsbScannerBtn) connectUsbScannerBtn.style.display = '';
-  setWebUsbStatus('Direct USB: disconnected.');
+  if (connectUsbScannerBtn){
+    connectUsbScannerBtn.textContent = 'Connect scanner';
+    connectUsbScannerBtn.classList.remove('connected');
+  }
+  setWebUsbStatus('Scanner not connected.');
 }
 
 async function connectDirectUsbScanner(){
   if (!('usb' in navigator)){
     setWebUsbStatus(
-      'WebUSB is not available in this browser. Open the site in Chrome on Android.',
+      'USB connection is not available in this browser. Use Chrome on Android.',
       'error'
     );
-    appendUsbDiag('navigator.usb is unavailable.');
+    return;
+  }
+
+  // If it is already connected, the same button simply keeps the connection.
+  if (directUsbDevice && directUsbDevice.opened && directUsbReading){
+    setWebUsbStatus(
+      'Scanner connected: ' + (directUsbDevice.productName || 'Datalogic'),
+      'ok'
+    );
     return;
   }
 
   try{
-    setWebUsbStatus('Choose the Datalogic scanner in the USB permission window…');
-    appendUsbDiag('Requesting Datalogic USB device (VID 0x05F9).');
+    if (connectUsbScannerBtn){
+      connectUsbScannerBtn.disabled = true;
+      connectUsbScannerBtn.textContent = 'Connecting…';
+    }
+    setWebUsbStatus('Looking for the Datalogic scanner…');
 
-    const device = await navigator.usb.requestDevice({
-      filters: [{ vendorId:DATALOGIC_VENDOR_ID }]
-    });
+    let device = null;
 
-    appendUsbDiag('Selected: ' + describeUsbDevice(device));
+    // First reuse a device the user already authorized before. This avoids
+    // showing the Android USB picker every time the keyboard/name field was used.
+    const granted = await navigator.usb.getDevices();
+    device = granted.find(d => d.vendorId === DATALOGIC_VENDOR_ID) || null;
+
+    // Only ask Android for permission if this browser has never been granted
+    // access to this Datalogic.
+    if (!device){
+      try{
+        device = await navigator.usb.requestDevice({
+          filters: [{ vendorId:DATALOGIC_VENDOR_ID }]
+        });
+      }catch(err){
+        if (err && err.name === 'NotFoundError'){
+          // User closed the chooser or Android had nothing new to offer.
+          // This is not a scanner fault, so keep the UI neutral.
+          setWebUsbStatus('Scanner not connected.');
+          if (connectUsbScannerBtn){
+            connectUsbScannerBtn.textContent = 'Connect scanner';
+            connectUsbScannerBtn.classList.remove('connected');
+          }
+          return;
+        }
+        throw err;
+      }
+    }
+
+    if (!device){
+      setWebUsbStatus('Scanner not connected.');
+      return;
+    }
+
+    appendUsbDiag('Using: ' + describeUsbDevice(device));
 
     if (!device.opened){
       await device.open();
-      appendUsbDiag('Device opened.');
     }
 
     if (!device.configuration){
-      // Most scanners expose configuration 1.
       await device.selectConfiguration(1);
-      appendUsbDiag('Configuration 1 selected.');
     }
-
-    appendUsbDiag('USB layout:\n' + usbConfigurationSummary(device));
 
     const choice = pickReadableUsbInterface(device);
 
     if (!choice){
       try{ await device.close(); }catch{}
       setWebUsbStatus(
-        'Datalogic detected, but no readable USB IN endpoint is exposed to the browser.',
+        'Datalogic detected, but this USB mode is not readable by Chrome.',
         'error'
-      );
-      appendUsbDiag(
-        'No bulk/interrupt IN endpoint found. The current scanner USB mode may be HID/OEM and reserved by Android.'
       );
       return;
     }
 
-    appendUsbDiag(
-      'Trying IF ' + choice.interfaceNumber +
-      ', alt ' + choice.alternateSetting +
-      ', EP' + choice.endpointNumber +
-      ', type ' + choice.endpointType +
-      ', class ' + hex4(choice.interfaceClass)
-    );
-
     try{
       await device.claimInterface(choice.interfaceNumber);
-      appendUsbDiag('Interface claimed.');
     }catch(err){
+      try{ await device.close(); }catch{}
       setWebUsbStatus(
-        'Datalogic found, but Android/Chrome blocked its current USB interface. Open USB diagnostic for details.',
+        'Datalogic detected, but Android is using its current USB interface.',
         'error'
       );
-      appendUsbDiag(
-        'claimInterface failed: ' + (err && err.message ? err.message : String(err))
-      );
-      try{ await device.close(); }catch{}
       return;
     }
 
@@ -2459,13 +2418,7 @@ async function connectDirectUsbScanner(){
           choice.interfaceNumber,
           choice.alternateSetting
         );
-        appendUsbDiag('Alternate interface selected.');
-      }catch(err){
-        appendUsbDiag(
-          'selectAlternateInterface warning: ' +
-          (err && err.message ? err.message : String(err))
-        );
-      }
+      }catch{}
     }
 
     directUsbDevice = device;
@@ -2473,29 +2426,35 @@ async function connectDirectUsbScanner(){
     directUsbEndpointIn = choice.endpointNumber;
     directUsbEndpointPacketSize = choice.packetSize || 64;
 
-    if (connectUsbScannerBtn) connectUsbScannerBtn.style.display = 'none';
-    if (disconnectUsbScannerBtn) disconnectUsbScannerBtn.style.display = '';
+    if (connectUsbScannerBtn){
+      connectUsbScannerBtn.disabled = false;
+      connectUsbScannerBtn.textContent = 'Scanner connected';
+      connectUsbScannerBtn.classList.add('connected');
+    }
 
     setWebUsbStatus(
-      'USB connected: ' + (device.productName || 'Datalogic') +
-      ' — scan a barcode now.',
+      'Connected: ' + (device.productName || 'Datalogic') +
+      ' — ready to scan.',
       'ok'
     );
 
     directUsbReadLoop();
   }catch(err){
     const msg = err && err.message ? err.message : String(err);
-    appendUsbDiag('Connection error: ' + msg);
 
-    if (err && err.name === 'NotFoundError'){
-      setWebUsbStatus('USB connection cancelled or no Datalogic device selected.', 'error');
-    }else if (err && err.name === 'SecurityError'){
+    if (err && err.name === 'SecurityError'){
       setWebUsbStatus(
-        'USB permission was blocked. Use Chrome and allow the USB device when Android asks.',
+        'USB permission was blocked. Allow the scanner when Android asks.',
         'error'
       );
     }else{
-      setWebUsbStatus('Could not connect to USB scanner: ' + msg, 'error');
+      setWebUsbStatus('Could not connect scanner: ' + msg, 'error');
+    }
+  }finally{
+    if (connectUsbScannerBtn && !directUsbDevice){
+      connectUsbScannerBtn.disabled = false;
+      connectUsbScannerBtn.textContent = 'Connect scanner';
+      connectUsbScannerBtn.classList.remove('connected');
     }
   }
 }
@@ -2504,25 +2463,7 @@ if (connectUsbScannerBtn){
   connectUsbScannerBtn.addEventListener('click', connectDirectUsbScanner);
 }
 
-if (disconnectUsbScannerBtn){
-  disconnectUsbScannerBtn.addEventListener('click', disconnectDirectUsbScanner);
-}
 
-if (toggleUsbDiagBtn){
-  toggleUsbDiagBtn.addEventListener('click', () => {
-    if (!webUsbDiag) return;
-    const open = webUsbDiag.style.display !== 'none';
-    webUsbDiag.style.display = open ? 'none' : 'block';
-
-    if (!open && !webUsbDiag.textContent){
-      appendUsbDiag(
-        ('usb' in navigator)
-          ? 'WebUSB API available. Tap Connect USB scanner.'
-          : 'WebUSB API NOT available in this browser.'
-      );
-    }
-  });
-}
 
 if ('usb' in navigator){
   navigator.usb.addEventListener('disconnect', event => {
@@ -2530,115 +2471,15 @@ if ('usb' in navigator){
       appendUsbDiag('USB device physically disconnected.');
       directUsbReading = false;
       directUsbDevice = null;
-      if (disconnectUsbScannerBtn) disconnectUsbScannerBtn.style.display = 'none';
-      if (connectUsbScannerBtn) connectUsbScannerBtn.style.display = '';
-      setWebUsbStatus('Datalogic disconnected from the phone.', 'error');
+      if (connectUsbScannerBtn){
+        connectUsbScannerBtn.disabled = false;
+        connectUsbScannerBtn.textContent = 'Connect scanner';
+        connectUsbScannerBtn.classList.remove('connected');
+      }
+      setWebUsbStatus('Scanner disconnected.');
     }
   });
 }
-
-
-// =====================================================
-// MOBILE USB DOCK / NAME-ENTRY FOCUS RECOVERY
-// =====================================================
-const mobileUsbDock = document.getElementById('mobileUsbDock');
-const mobileConnectUsbBtn = document.getElementById('mobileConnectUsbBtn');
-const mobileReconnectUsbBtn = document.getElementById('mobileReconnectUsbBtn');
-const mobileUsbStatus = document.getElementById('mobileUsbStatus');
-
-function setMobileUsbStatus(message, type=''){
-  if (!mobileUsbStatus) return;
-  mobileUsbStatus.textContent = message;
-  mobileUsbStatus.classList.remove('ok','error');
-  if (type) mobileUsbStatus.classList.add(type);
-}
-
-function syncMobileUsbDock(){
-  if (!mobileConnectUsbBtn || !mobileReconnectUsbBtn) return;
-
-  const connected = !!(directUsbDevice && directUsbDevice.opened);
-
-  mobileConnectUsbBtn.style.display = connected ? 'none' : '';
-  mobileReconnectUsbBtn.style.display = connected ? '' : 'none';
-
-  if (connected){
-    setMobileUsbStatus(
-      'Connected: ' + (directUsbDevice.productName || 'Datalogic'),
-      'ok'
-    );
-  }else{
-    setMobileUsbStatus('USB scanner not connected');
-  }
-}
-
-async function mobileConnectUsb(){
-  await connectDirectUsbScanner();
-  syncMobileUsbDock();
-}
-
-async function mobileReconnectUsb(){
-  // If Android/Chrome kept the device open, just re-use it.
-  if (directUsbDevice && directUsbDevice.opened){
-    directUsbReading = false;
-    await new Promise(r => setTimeout(r, 60));
-    directUsbReading = true;
-    directUsbReadLoop();
-    setMobileUsbStatus(
-      'Reconnected: ' + (directUsbDevice.productName || 'Datalogic'),
-      'ok'
-    );
-    return;
-  }
-
-  await connectDirectUsbScanner();
-  syncMobileUsbDock();
-}
-
-if (mobileConnectUsbBtn){
-  mobileConnectUsbBtn.addEventListener('click', mobileConnectUsb);
-}
-
-if (mobileReconnectUsbBtn){
-  mobileReconnectUsbBtn.addEventListener('click', mobileReconnectUsb);
-}
-
-// Keep the connect control available even while the software keyboard is open
-// and after checker-name entry closes.
-document.addEventListener('focusin', () => {
-  setTimeout(syncMobileUsbDock, 20);
-});
-
-document.addEventListener('focusout', () => {
-  setTimeout(syncMobileUsbDock, 80);
-});
-
-window.addEventListener('resize', () => {
-  setTimeout(syncMobileUsbDock, 80);
-});
-
-// Some mobile browsers resize the visual viewport when the keyboard opens.
-// Keep the dock pinned to the visible viewport and re-sync when it closes.
-if (window.visualViewport){
-  window.visualViewport.addEventListener('resize', () => {
-    setTimeout(syncMobileUsbDock, 50);
-  });
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden){
-    setTimeout(syncMobileUsbDock, 100);
-  }
-});
-
-// Mirror status changes from the main WebUSB controls into the mobile dock.
-const originalSetWebUsbStatus = setWebUsbStatus;
-setWebUsbStatus = function(message, type=''){
-  originalSetWebUsbStatus(message, type);
-  setMobileUsbStatus(message, type === 'ok' ? 'ok' : (type === 'error' ? 'error' : ''));
-  syncMobileUsbDock();
-};
-
-setTimeout(syncMobileUsbDock, 200);
 
 // =====================================================
 // APP START
@@ -2647,13 +2488,6 @@ setTimeout(syncMobileUsbDock, 200);
 bindCheckerChangeButton();
 ensureSiteAccess().then(() => requestCheckerName(true)).then(() => init());
 </script>
-
-
-<div class="mobile-usb-dock" id="mobileUsbDock">
-  <button class="btn" id="mobileConnectUsbBtn" type="button">Connect scanner</button>
-  <button class="btn" id="mobileReconnectUsbBtn" type="button" style="display:none;">Reconnect</button>
-  <div id="mobileUsbStatus">USB scanner not connected</div>
-</div>
 
 </body>
 </html>
