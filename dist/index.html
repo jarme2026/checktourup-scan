@@ -336,6 +336,36 @@
 #barcodeLastResult{
   font-family:'Courier New',monospace; font-size:12px; color:var(--ink-soft);
 }
+
+.hardware-scanner-box{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  width:100%;
+}
+#hardwareScanInput{
+  flex:1 1 260px;
+  min-width:180px;
+  padding:10px 12px;
+  border:1px solid var(--board-dark);
+  border-radius:6px;
+  background:var(--card);
+  color:var(--ink);
+  font-size:16px;
+}
+#hardwareScanInput:focus{
+  outline:2px solid var(--stamp-green);
+  outline-offset:1px;
+}
+#hardwareScannerStatus{
+  font-size:12px;
+  color:var(--ink-soft);
+  width:100%;
+}
+#hardwareScannerStatus.ready{color:var(--stamp-green);font-weight:600}
+#hardwareScannerStatus.error{color:var(--stamp-red);font-weight:600}
+
 #barcodeScannerPanel{
   display:none; position:fixed; inset:0; z-index:150000; background:rgba(0,0,0,.86);
   align-items:flex-start; justify-content:center; padding-top:0;
@@ -430,8 +460,22 @@
 
 
       <div class="barcode-tools">
-        <button class="btn scan-btn" id="scanBarcodeBtn" type="button">Scan barcode</button>
+        <button class="btn scan-btn" id="scanBarcodeBtn" type="button">Use camera</button>
         <span id="barcodeLastResult">Ready to scan.</span>
+        <div class="hardware-scanner-box">
+          <input
+            id="hardwareScanInput"
+            type="text"
+            inputmode="none"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            aria-label="USB barcode scanner input"
+            placeholder="Datalogic / USB scanner — scan here"
+          >
+          <button class="btn" id="focusHardwareScannerBtn" type="button">USB scanner</button>
+          <div id="hardwareScannerStatus" class="ready">USB/OTG scanner ready. Scan a barcode; Enter or Tab will submit automatically.</div>
+        </div>
       </div>
       <div id="barcodeScannerPanel">
         <div class="barcode-camera-wrap">
@@ -1479,30 +1523,59 @@ async function ensureSiteAccess(){
 // BARCODE SCANNER
 // Same Checktour checklist; scanner is only an alternate way to tick a row.
 // Manual checkbox/quantity controls remain fully available.
+//
+// Robust scan rules:
+// - accept numeric and alphanumeric codes
+// - compare only against codes that actually exist in the configured barcode column
+// - support multiple codes in one spreadsheet cell (comma/semicolon/pipe/new line)
+// - ignore unrelated barcodes and KEEP the camera open
+// - close the camera only after a valid checklist barcode is successfully saved
 // =====================================================
 let barcodeScanner = null;
 let barcodeScannerRunning = false;
 let barcodeScanLocked = false;
+let lastIgnoredBarcode = '';
+let lastIgnoredAt = 0;
 
 function normalizeBarcode(value){
-  return String(value ?? '').trim().toUpperCase();
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
 }
 
-function findRowByBarcode(decodedText){
-  if (barcodeColIndex < 0) return -1;
+function getBarcodeTokens(cellValue){
+  const raw = String(cellValue ?? '').trim();
+  if (!raw) return [];
+
+  // A quantity row can contain more than one physical barcode in the same cell,
+  // e.g. "B0024125977, B0024125976".
+  return raw
+    .split(/[\n\r,;|]+/)
+    .map(normalizeBarcode)
+    .filter(Boolean);
+}
+
+function findRowsByBarcode(decodedText){
+  if (barcodeColIndex < 0) return [];
   const target = normalizeBarcode(decodedText);
-  if (!target) return -1;
+  if (!target) return [];
 
   const matches = [];
   rows.forEach((row, index) => {
-    if (normalizeBarcode(row[barcodeColIndex]) === target){
-      matches.push(index);
-    }
+    const codes = getBarcodeTokens(row[barcodeColIndex]);
+    if (codes.includes(target)) matches.push(index);
   });
+  return matches;
+}
 
+function findRowByBarcode(decodedText){
+  const matches = findRowsByBarcode(decodedText);
   if (!matches.length) return -1;
 
-  // If the same barcode appears more than once, prefer a row that is not complete.
+  // If the same barcode appears more than once, prefer a row that still needs quantity.
   const incomplete = matches.find(index => {
     const expected = parseExpectedQty(rows[index]);
     const tick = allTicks[rowKeys[index]];
@@ -1513,19 +1586,25 @@ function findRowByBarcode(decodedText){
   return incomplete ?? matches[0];
 }
 
+function barcodeSuccessFeedback(){
+  try{
+    if (navigator.vibrate) navigator.vibrate(90);
+  }catch{}
+}
+
 async function applyBarcodeToChecklist(decodedText){
   const resultLabel = document.getElementById('barcodeLastResult');
   const code = normalizeBarcode(decodedText);
 
   if (barcodeColIndex < 0){
     resultLabel.textContent = 'Barcode column is not configured. Use the admin link to select it.';
-    return false;
+    return { ok:false, reason:'not-configured' };
   }
 
   const rowIndex = findRowByBarcode(code);
   if (rowIndex < 0){
-    resultLabel.textContent = 'Code not found: ' + code;
-    return false;
+    resultLabel.textContent = 'Ignored — not in sheet: ' + code;
+    return { ok:false, reason:'not-found' };
   }
 
   const key = rowKeys[rowIndex];
@@ -1533,8 +1612,13 @@ async function applyBarcodeToChecklist(decodedText){
   const existing = allTicks[key] || {};
   const current = Number(existing.qty || 0);
 
+  if (current >= expected){
+    resultLabel.textContent = `${code} → item already complete (${current}/${expected})`;
+    return { ok:true, alreadyComplete:true, rowIndex, code, current, expected };
+  }
+
   // Scanner behaves like the existing checklist:
-  // checkbox row -> complete it; quantity row -> add one unit per scan.
+  // checkbox row -> complete it; quantity row -> add one unit per successful scan.
   const newQty = qtyColIndex >= 0
     ? Math.min(expected, current + 1)
     : 1;
@@ -1543,7 +1627,7 @@ async function applyBarcodeToChecklist(decodedText){
 
   if (!response){
     resultLabel.textContent = 'Could not save scan: ' + code;
-    return false;
+    return { ok:false, reason:'save-failed' };
   }
 
   if (response.ticks) allTicks = response.ticks;
@@ -1555,7 +1639,8 @@ async function applyBarcodeToChecklist(decodedText){
   }
 
   resultLabel.textContent = `${code} → ${newQty}/${expected}`;
-  return true;
+  barcodeSuccessFeedback();
+  return { ok:true, rowIndex, code, current:newQty, expected };
 }
 
 async function startBarcodeScanner(){
@@ -1571,6 +1656,8 @@ async function startBarcodeScanner(){
   }
 
   barcodeScanLocked = false;
+  lastIgnoredBarcode = '';
+  lastIgnoredAt = 0;
   panel.classList.add('open');
   status.textContent = 'Starting camera…';
 
@@ -1580,27 +1667,51 @@ async function startBarcodeScanner(){
     await barcodeScanner.start(
       { facingMode:'environment' },
       {
-        fps:15,
+        fps:18,
         qrbox:(w,h)=>({
-          width:Math.floor(w * 0.92),
-          height:Math.floor(Math.min(h * 0.60, 130))
+          width:Math.floor(w * 0.94),
+          height:Math.floor(Math.min(h * 0.62, 150))
         }),
-        aspectRatio:2.4,
+        aspectRatio:2.2,
         disableFlip:false
       },
       async decodedText => {
         if (barcodeScanLocked) return;
-        barcodeScanLocked = true;
 
-        status.textContent = 'Scanned: ' + decodedText;
-        await applyBarcodeToChecklist(decodedText);
-        await stopBarcodeScanner();
+        const code = normalizeBarcode(decodedText);
+        if (!code) return;
+
+        // Critical behavior: a camera can see product/item barcodes before it sees the
+        // package barcode. If the decoded value is not in the spreadsheet, ignore it
+        // and KEEP scanning instead of locking/closing the camera.
+        if (findRowByBarcode(code) < 0){
+          const now = Date.now();
+          if (code !== lastIgnoredBarcode || (now - lastIgnoredAt) > 1200){
+            status.textContent = 'Not in sheet — keep scanning: ' + code;
+            lastIgnoredBarcode = code;
+            lastIgnoredAt = now;
+          }
+          return;
+        }
+
+        // Lock only when the scanned value is a valid code from the spreadsheet.
+        barcodeScanLocked = true;
+        status.textContent = 'Matched: ' + code;
+
+        const result = await applyBarcodeToChecklist(code);
+        if (result && result.ok){
+          await stopBarcodeScanner();
+        }else{
+          // Save/network failure: unlock so the user can try again without reopening.
+          barcodeScanLocked = false;
+          status.textContent = 'Could not save — try scanning again.';
+        }
       },
       () => {}
     );
 
     barcodeScannerRunning = true;
-    status.textContent = 'Point the camera at one barcode.';
+    status.textContent = 'Point the camera at a barcode from this checklist.';
   }catch(err){
     console.error('Could not start barcode scanner', err);
     barcodeScannerRunning = false;
@@ -1615,6 +1726,7 @@ async function stopBarcodeScanner(){
   const current = barcodeScanner;
   barcodeScanner = null;
   barcodeScannerRunning = false;
+  barcodeScanLocked = false;
 
   try{
     if (current){
@@ -1636,6 +1748,243 @@ window.addEventListener('pagehide', () => {
   }
 });
 
+
+
+// =====================================================
+// DATALOGIC / USB-OTG HARDWARE BARCODE SCANNER
+//
+// QuickScan QW2100 units configured as USB HID Keyboard act like a physical
+// keyboard on Android. The scanner types the barcode and normally finishes
+// with Enter or Tab.
+//
+// Supported here:
+// - dedicated USB scanner field
+// - Enter / Tab suffix
+// - scanners without a suffix (idle-time submit)
+// - global fast-key fallback when focus moves away
+// - numeric + alphanumeric codes
+// - multiple barcodes in one spreadsheet cell
+// =====================================================
+const hardwareScanInput = document.getElementById('hardwareScanInput');
+const focusHardwareScannerBtn = document.getElementById('focusHardwareScannerBtn');
+const hardwareScannerStatus = document.getElementById('hardwareScannerStatus');
+
+let hardwareScanTimer = null;
+let hardwareScanBusy = false;
+let hardwareGlobalBuffer = '';
+let hardwareGlobalLastKeyAt = 0;
+let hardwareLastAcceptedCode = '';
+let hardwareLastAcceptedAt = 0;
+
+function setHardwareScannerStatus(message, type='ready'){
+  if (!hardwareScannerStatus) return;
+  hardwareScannerStatus.textContent = message;
+  hardwareScannerStatus.classList.remove('ready', 'error');
+  if (type) hardwareScannerStatus.classList.add(type);
+}
+
+function focusHardwareScanner(){
+  if (!hardwareScanInput) return;
+  try{
+    hardwareScanInput.focus({ preventScroll:true });
+  }catch{
+    hardwareScanInput.focus();
+  }
+}
+
+function clearHardwareScannerInput(){
+  if (hardwareScanTimer){
+    clearTimeout(hardwareScanTimer);
+    hardwareScanTimer = null;
+  }
+  if (hardwareScanInput) hardwareScanInput.value = '';
+  hardwareGlobalBuffer = '';
+}
+
+async function submitHardwareBarcode(rawCode){
+  const code = normalizeBarcode(rawCode);
+  clearHardwareScannerInput();
+
+  if (!code || hardwareScanBusy) return;
+
+  if (barcodeColIndex < 0){
+    setHardwareScannerStatus('Barcode column is not configured.', 'error');
+    document.getElementById('barcodeLastResult').textContent =
+      'Barcode column is not configured. Use the admin link to select it.';
+    return;
+  }
+
+  const now = Date.now();
+  if (code === hardwareLastAcceptedCode && (now - hardwareLastAcceptedAt) < 350){
+    focusHardwareScanner();
+    return;
+  }
+
+  hardwareScanBusy = true;
+  setHardwareScannerStatus('Reading: ' + code, 'ready');
+
+  try{
+    const rowIndex = findRowByBarcode(code);
+
+    if (rowIndex < 0){
+      document.getElementById('barcodeLastResult').textContent =
+        'Ignored — not in sheet: ' + code;
+      setHardwareScannerStatus(
+        'Not in sheet: ' + code + ' — ready for next scan.',
+        'error'
+      );
+      return;
+    }
+
+    const result = await applyBarcodeToChecklist(code);
+
+    if (result && result.ok){
+      hardwareLastAcceptedCode = code;
+      hardwareLastAcceptedAt = Date.now();
+
+      if (result.alreadyComplete){
+        setHardwareScannerStatus(
+          code + ' — item already complete. Ready for next scan.',
+          'ready'
+        );
+      }else{
+        setHardwareScannerStatus(
+          code + ' accepted → ' + result.current + '/' + result.expected +
+          '. Ready for next scan.',
+          'ready'
+        );
+      }
+    }else{
+      setHardwareScannerStatus(
+        'Could not save ' + code + ' — scan again.',
+        'error'
+      );
+    }
+  }finally{
+    hardwareScanBusy = false;
+    setTimeout(focusHardwareScanner, 40);
+  }
+}
+
+function scheduleHardwareIdleSubmit(){
+  if (hardwareScanTimer) clearTimeout(hardwareScanTimer);
+
+  hardwareScanTimer = setTimeout(() => {
+    const value = hardwareScanInput ? hardwareScanInput.value : '';
+    if (normalizeBarcode(value).length >= 4){
+      submitHardwareBarcode(value);
+    }
+  }, 140);
+}
+
+if (hardwareScanInput){
+  hardwareScanInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === 'Tab'){
+      e.preventDefault();
+      e.stopPropagation();
+      submitHardwareBarcode(hardwareScanInput.value);
+      return;
+    }
+
+    if (e.key === 'Escape'){
+      e.preventDefault();
+      clearHardwareScannerInput();
+      setHardwareScannerStatus('USB scanner ready.', 'ready');
+      return;
+    }
+
+    if (e.key.length === 1){
+      scheduleHardwareIdleSubmit();
+    }
+  });
+
+  hardwareScanInput.addEventListener('input', scheduleHardwareIdleSubmit);
+}
+
+if (focusHardwareScannerBtn){
+  focusHardwareScannerBtn.addEventListener('click', () => {
+    focusHardwareScanner();
+    setHardwareScannerStatus(
+      'USB/OTG scanner focused — scan now. No camera is required.',
+      'ready'
+    );
+  });
+}
+
+// Global fallback for HID keyboard scanners. It deliberately ignores ordinary
+// editable fields so manual typing in Search / Notes / Name still works.
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented || hardwareScanBusy) return;
+
+  const afterUploadEl = document.getElementById('afterUpload');
+  if (!afterUploadEl || afterUploadEl.style.display === 'none') return;
+
+  const active = document.activeElement;
+  const tag = active && active.tagName ? active.tagName.toLowerCase() : '';
+  const isEditable =
+    active === hardwareScanInput ||
+    tag === 'textarea' ||
+    tag === 'select' ||
+    (tag === 'input' && active !== hardwareScanInput) ||
+    (active && active.isContentEditable);
+
+  if (isEditable) return;
+
+  const now = Date.now();
+
+  if (e.key === 'Enter' || e.key === 'Tab'){
+    if (hardwareGlobalBuffer.length >= 4){
+      e.preventDefault();
+      const code = hardwareGlobalBuffer;
+      hardwareGlobalBuffer = '';
+      submitHardwareBarcode(code);
+    }
+    return;
+  }
+
+  if (e.key.length !== 1 || e.ctrlKey || e.altKey || e.metaKey) return;
+
+  if ((now - hardwareGlobalLastKeyAt) > 120){
+    hardwareGlobalBuffer = '';
+  }
+
+  hardwareGlobalLastKeyAt = now;
+  hardwareGlobalBuffer += e.key;
+
+  if (hardwareScanTimer) clearTimeout(hardwareScanTimer);
+  hardwareScanTimer = setTimeout(() => {
+    if (hardwareGlobalBuffer.length >= 4){
+      const code = hardwareGlobalBuffer;
+      hardwareGlobalBuffer = '';
+      submitHardwareBarcode(code);
+    }
+  }, 140);
+});
+
+// When the checklist becomes visible, automatically focus the HID field.
+// inputmode="none" avoids opening the soft keyboard on supported Android browsers.
+const afterUploadForHardware = document.getElementById('afterUpload');
+if (afterUploadForHardware){
+  const hardwareFocusObserver = new MutationObserver(() => {
+    if (afterUploadForHardware.style.display !== 'none'){
+      setTimeout(() => {
+        const active = document.activeElement;
+        const tag = active && active.tagName ? active.tagName.toLowerCase() : '';
+        const userTyping =
+          tag === 'textarea' ||
+          tag === 'select' ||
+          (tag === 'input' && active !== hardwareScanInput);
+
+        if (!userTyping) focusHardwareScanner();
+      }, 100);
+    }
+  });
+
+  hardwareFocusObserver.observe(afterUploadForHardware, {
+    attributes:true,
+    attributeFilter:['style']
+  });
+}
 
 // =====================================================
 // APP START
