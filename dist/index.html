@@ -413,6 +413,45 @@
   background:rgba(0,0,0,.02);
   display:none;
 }
+
+@media (max-width:700px){
+  .mobile-usb-dock{
+    position:fixed;
+    left:8px;
+    right:8px;
+    bottom:10px;
+    z-index:9998;
+    display:flex;
+    gap:8px;
+    align-items:center;
+    padding:10px;
+    border:1px solid var(--board-dark);
+    border-radius:10px;
+    background:var(--card);
+    box-shadow:0 6px 24px rgba(0,0,0,.18);
+  }
+  .mobile-usb-dock .btn{
+    flex:1 1 auto;
+    width:auto;
+    margin:0;
+  }
+  #mobileUsbStatus{
+    flex:2 1 auto;
+    font-size:11px;
+    line-height:1.2;
+    color:var(--ink-soft);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  #mobileUsbStatus.ok{color:var(--stamp-green);font-weight:700}
+  #mobileUsbStatus.error{color:var(--stamp-red);font-weight:700}
+  body{ padding-bottom:110px !important; }
+}
+@media (min-width:701px){
+  .mobile-usb-dock{ display:none; }
+}
+
 @media (max-width:700px){
   .webusb-mobile-box{
     display:flex;
@@ -2498,6 +2537,109 @@ if ('usb' in navigator){
   });
 }
 
+
+// =====================================================
+// MOBILE USB DOCK / NAME-ENTRY FOCUS RECOVERY
+// =====================================================
+const mobileUsbDock = document.getElementById('mobileUsbDock');
+const mobileConnectUsbBtn = document.getElementById('mobileConnectUsbBtn');
+const mobileReconnectUsbBtn = document.getElementById('mobileReconnectUsbBtn');
+const mobileUsbStatus = document.getElementById('mobileUsbStatus');
+
+function setMobileUsbStatus(message, type=''){
+  if (!mobileUsbStatus) return;
+  mobileUsbStatus.textContent = message;
+  mobileUsbStatus.classList.remove('ok','error');
+  if (type) mobileUsbStatus.classList.add(type);
+}
+
+function syncMobileUsbDock(){
+  if (!mobileConnectUsbBtn || !mobileReconnectUsbBtn) return;
+
+  const connected = !!(directUsbDevice && directUsbDevice.opened);
+
+  mobileConnectUsbBtn.style.display = connected ? 'none' : '';
+  mobileReconnectUsbBtn.style.display = connected ? '' : 'none';
+
+  if (connected){
+    setMobileUsbStatus(
+      'Connected: ' + (directUsbDevice.productName || 'Datalogic'),
+      'ok'
+    );
+  }else{
+    setMobileUsbStatus('USB scanner not connected');
+  }
+}
+
+async function mobileConnectUsb(){
+  await connectDirectUsbScanner();
+  syncMobileUsbDock();
+}
+
+async function mobileReconnectUsb(){
+  // If Android/Chrome kept the device open, just re-use it.
+  if (directUsbDevice && directUsbDevice.opened){
+    directUsbReading = false;
+    await new Promise(r => setTimeout(r, 60));
+    directUsbReading = true;
+    directUsbReadLoop();
+    setMobileUsbStatus(
+      'Reconnected: ' + (directUsbDevice.productName || 'Datalogic'),
+      'ok'
+    );
+    return;
+  }
+
+  await connectDirectUsbScanner();
+  syncMobileUsbDock();
+}
+
+if (mobileConnectUsbBtn){
+  mobileConnectUsbBtn.addEventListener('click', mobileConnectUsb);
+}
+
+if (mobileReconnectUsbBtn){
+  mobileReconnectUsbBtn.addEventListener('click', mobileReconnectUsb);
+}
+
+// Keep the connect control available even while the software keyboard is open
+// and after checker-name entry closes.
+document.addEventListener('focusin', () => {
+  setTimeout(syncMobileUsbDock, 20);
+});
+
+document.addEventListener('focusout', () => {
+  setTimeout(syncMobileUsbDock, 80);
+});
+
+window.addEventListener('resize', () => {
+  setTimeout(syncMobileUsbDock, 80);
+});
+
+// Some mobile browsers resize the visual viewport when the keyboard opens.
+// Keep the dock pinned to the visible viewport and re-sync when it closes.
+if (window.visualViewport){
+  window.visualViewport.addEventListener('resize', () => {
+    setTimeout(syncMobileUsbDock, 50);
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden){
+    setTimeout(syncMobileUsbDock, 100);
+  }
+});
+
+// Mirror status changes from the main WebUSB controls into the mobile dock.
+const originalSetWebUsbStatus = setWebUsbStatus;
+setWebUsbStatus = function(message, type=''){
+  originalSetWebUsbStatus(message, type);
+  setMobileUsbStatus(message, type === 'ok' ? 'ok' : (type === 'error' ? 'error' : ''));
+  syncMobileUsbDock();
+};
+
+setTimeout(syncMobileUsbDock, 200);
+
 // =====================================================
 // APP START
 // Always identify the checker before loading shared data.
@@ -2505,6 +2647,13 @@ if ('usb' in navigator){
 bindCheckerChangeButton();
 ensureSiteAccess().then(() => requestCheckerName(true)).then(() => init());
 </script>
+
+
+<div class="mobile-usb-dock" id="mobileUsbDock">
+  <button class="btn" id="mobileConnectUsbBtn" type="button">Connect scanner</button>
+  <button class="btn" id="mobileReconnectUsbBtn" type="button" style="display:none;">Reconnect</button>
+  <div id="mobileUsbStatus">USB scanner not connected</div>
+</div>
 
 </body>
 </html>
