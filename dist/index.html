@@ -880,6 +880,7 @@ async function applyParsedData(parsedHeaders, parsedRows, displayName){
   if (ok){
     renderTable();
     startPolling();
+    setTimeout(warmUpOcr, 1200);
   }
 }
 
@@ -1594,6 +1595,7 @@ async function init(){
     buildKeys();
     renderTable();
     startPolling();
+    setTimeout(warmUpOcr, 1200);
   } else if (isAdmin){
     uploadArea.style.display = 'block';
   } else {
@@ -1925,6 +1927,118 @@ function loadTesseract(){
   return tesseractLoadPromise;
 }
 
+function withTimeout(promise, ms, message){
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms))
+  ]);
+}
+
+// A brand-new Tesseract worker downloads the language model and boots the
+// WASM engine from scratch every time — that alone can take 10-20s on a
+// phone connection. Creating it once and reusing it for every scan removes
+// that cost from every scan after the first. LSTM-only (oem 1) skips the
+// legacy engine entirely, and a single language ('por') avoids loading a
+// second model that a Portuguese label rarely needs.
+let ocrWorkerPromise = null;
+
+function updateOcrProgressUI(m){
+  const el = document.getElementById('ocrLastResult');
+  if (!el || !m || !m.status) return;
+  if (m.status === 'recognizing text' && typeof m.progress === 'number'){
+    el.textContent = `Reading label… ${Math.round(m.progress * 100)}%`;
+  } else if (/loading|loaded|initializ/i.test(m.status)){
+    el.textContent = 'Loading OCR engine (first scan only)…';
+  }
+}
+
+function getOcrWorker(){
+  if (!ocrWorkerPromise){
+    ocrWorkerPromise = loadTesseract()
+      .then(() => Tesseract.createWorker('por', 1, { logger: updateOcrProgressUI }))
+      .then(async worker => {
+        // Sparse-text layout: a label mixes a logo, a barcode graphic and
+        // several separate text fields, not one uniform paragraph — the
+        // default page-segmentation mode often misreads that as a single
+        // block and drops whole fields.
+        await worker.setParameters({ tessedit_pageseg_mode: '11' });
+        return worker;
+      })
+      .catch(err => {
+        ocrWorkerPromise = null; // allow retrying after a failed load
+        throw err;
+      });
+  }
+  return ocrWorkerPromise;
+}
+
+function warmUpOcr(){
+  if (!document.getElementById('scanLabelBtn')) return;
+  getOcrWorker().catch(err => console.warn('OCR warm-up failed', err));
+}
+
+// Phone photos routinely come in at 3000-4000px on the long side; OCR time
+// grows roughly with pixel count, so recognizing that untouched is the
+// single biggest source of slowness. Downscaling to a print-legible size
+// and stretching contrast (faded/glossy labels are low-contrast under
+// phone flash) cuts recognition time dramatically and usually improves
+// accuracy at the same time.
+function preprocessLabelImage(file, maxDim = 1500){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      try{
+        const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+        const w = Math.max(1, Math.round(img.naturalWidth * scale));
+        const h = Math.max(1, Math.round(img.naturalHeight * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const imageData = ctx.getImageData(0, 0, w, h);
+        const pixels = imageData.data;
+
+        let min = 255, max = 0;
+        const gray = new Uint8ClampedArray(w * h);
+        for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
+          const g = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+          gray[p] = g;
+          if (g < min) min = g;
+          if (g > max) max = g;
+        }
+
+        const range = Math.max(1, max - min);
+        for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
+          const stretched = ((gray[p] - min) / range) * 255;
+          pixels[i] = pixels[i + 1] = pixels[i + 2] = stretched;
+        }
+
+        ctx.putImageData(imageData, 0, 0);
+        canvas.toBlob(
+          blob => blob ? resolve(blob) : reject(new Error('Could not process photo')),
+          'image/jpeg',
+          0.92
+        );
+      }catch(err){
+        reject(err);
+      }
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Could not load photo'));
+    };
+
+    img.src = url;
+  });
+}
+
 function stripAccents(value){
   return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
@@ -1944,12 +2058,26 @@ function extractPoCandidates(ocrText){
   return Array.from(new Set(matches));
 }
 
-function scoreRowAgainstOcr(row, ocrTokenSet, poCandidates){
+function extractDigitStream(ocrText){
+  return ocrText.replace(/[^0-9]/g, '');
+}
+
+function scoreRowAgainstOcr(row, ocrTokenSet, poCandidates, digitStream){
   let score = 0;
 
   if (poColIndex >= 0){
     const poValue = ocrNormalizeText(row[poColIndex]).trim();
-    if (poValue && poCandidates.includes(poValue)) score += 1000;
+    if (poValue){
+      if (poCandidates.includes(poValue)){
+        // A clean, isolated match of the PO number as its own token.
+        score += 1000;
+      } else if (poValue.length >= 4 && digitStream.includes(poValue)){
+        // OCR often runs the PO number together with a neighboring label/
+        // barcode digit, so also accept it as a substring of every digit
+        // read off the label, just scored lower than a clean match.
+        score += 700;
+      }
+    }
   }
 
   const rowTokens = new Set(ocrTokens(row.map(c => String(c ?? '')).join(' ')));
@@ -1964,10 +2092,11 @@ function scoreRowAgainstOcr(row, ocrTokenSet, poCandidates){
 
 function findLabelCandidates(ocrText){
   const poCandidates = extractPoCandidates(ocrText);
+  const digitStream = extractDigitStream(ocrText);
   const ocrTokenSet = new Set(ocrTokens(ocrText));
 
   return rows
-    .map((row, index) => ({ index, score: scoreRowAgainstOcr(row, ocrTokenSet, poCandidates) }))
+    .map((row, index) => ({ index, score: scoreRowAgainstOcr(row, ocrTokenSet, poCandidates, digitStream) }))
     .filter(c => c.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
@@ -2037,7 +2166,7 @@ function renderOcrCandidates(candidates){
 
     const scoreEl = document.createElement('span');
     scoreEl.className = 'ocr-score';
-    scoreEl.textContent = score >= 1000 ? 'PO match' : 'text match';
+    scoreEl.textContent = score >= 1000 ? 'PO match' : (score >= 700 ? 'PO match (fuzzy)' : 'text match');
 
     item.appendChild(info);
     item.appendChild(scoreEl);
@@ -2060,17 +2189,28 @@ async function handleLabelPhoto(file){
   }
 
   scanBtn.disabled = true;
-  resultLabel.textContent = 'Loading OCR engine…';
+  resultLabel.textContent = 'Preparing photo…';
 
   try{
-    await loadTesseract();
-    resultLabel.textContent = 'Reading label…';
+    const processedImage = await preprocessLabelImage(file);
 
-    const { data } = await Tesseract.recognize(file, 'por+eng');
+    resultLabel.textContent = 'Loading OCR engine…';
+    const worker = await withTimeout(
+      getOcrWorker(),
+      25000,
+      'OCR engine took too long to load — check your connection and try again.'
+    );
+
+    resultLabel.textContent = 'Reading label…';
+    const { data } = await withTimeout(
+      worker.recognize(processedImage),
+      20000,
+      'Reading the label took too long — try again with a steadier, closer photo.'
+    );
     const ocrText = ocrNormalizeText(data.text || '');
 
     if (!ocrText.trim()){
-      resultLabel.textContent = 'Could not read any text on that photo. Try again with better light/focus.';
+      resultLabel.textContent = 'Could not read any text on that photo. Get closer, fill the frame with the label, and avoid glare.';
       return;
     }
 
@@ -2082,7 +2222,7 @@ async function handleLabelPhoto(file){
       : 'No match found in the sheet.';
   }catch(err){
     console.error('OCR failed', err);
-    resultLabel.textContent = 'Could not read that photo. Try again.';
+    resultLabel.textContent = (err && err.message) || 'Could not read that photo. Try again.';
   }finally{
     scanBtn.disabled = false;
   }
