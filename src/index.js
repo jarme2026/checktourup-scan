@@ -615,6 +615,11 @@ export class ChecklistState {
               ? dataset.barcodeColIndex
               : -1,
 
+          poColIndex:
+            dataset
+              ? dataset.poColIndex
+              : -1,
+
           ticks,
 
           notes,
@@ -672,7 +677,10 @@ export class ChecklistState {
               body.qtyColIndex,
 
             barcodeColIndex:
-              body.barcodeColIndex
+              body.barcodeColIndex,
+
+            poColIndex:
+              body.poColIndex
           }
         );
 
