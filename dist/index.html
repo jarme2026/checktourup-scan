@@ -549,7 +549,7 @@
           <select id="barcodeColSelect"></select>
         </div>
         <div class="field">
-          <label for="poColSelect">PO / Pedido column</label>
+          <label for="poColSelect">PO / Purchase column</label>
           <select id="poColSelect"></select>
         </div>
         <button class="btn danger" id="resetBtn">Clear all progress</button>
@@ -902,7 +902,7 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex,
 
   const nonePoOpt = document.createElement('option');
   nonePoOpt.value = '-1';
-  nonePoOpt.textContent = '(select PO / pedido column)';
+  nonePoOpt.textContent = '(select PO / purchase column)';
   poColSelect.appendChild(nonePoOpt);
 
   headers.forEach((h, i) => {
@@ -957,7 +957,7 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex,
     poColIndex = presetPoIndex;
   } else {
     const poGuess = headers.findIndex(h =>
-      /pedido|\bpo\b|order|\bpp\b/i.test(h)
+      /purchase|\bpo\b|order|\bpp\b/i.test(h)
     );
     poColIndex = poGuess >= 0 ? poGuess : -1;
   }
@@ -1906,7 +1906,7 @@ window.addEventListener('pagehide', () => {
 // LABEL PHOTO (OCR) MATCHING
 //
 // Some labels don't carry a barcode value that exists anywhere in the sheet —
-// the sheet only has the PO/pedido number and the item description. For
+// the sheet only has the PO/purchase number and the item description. For
 // those, the camera takes one photo of the whole label, OCR reads the
 // printed text, and we score every row by PO number match + description
 // word overlap. OCR is never trusted to auto-tick: the best matches are
@@ -2184,7 +2184,7 @@ async function handleLabelPhoto(file){
   const resultLabel = document.getElementById('ocrLastResult');
   const scanBtn = document.getElementById('scanLabelBtn');
 
-  if (poColIndex < 0 && !confirm('No PO/Pedido column is configured — matching will rely only on text similarity, which is less reliable. Continue anyway?')){
+  if (poColIndex < 0 && !confirm('No PO/Purchase column is configured — matching will rely only on text similarity, which is less reliable. Continue anyway?')){
     return;
   }
 
