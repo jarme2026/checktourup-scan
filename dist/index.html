@@ -445,6 +445,48 @@
   #barcodeLastResult{width:100%}
 }
 
+.ocr-tools{
+  display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin:0 0 16px;
+}
+.ocr-tools .btn.ocr-btn{
+  border-color:#3A6EA5; background:#3A6EA5; color:#fff;
+}
+.ocr-tools .btn.ocr-btn:hover{background:#2F5A85}
+.ocr-tools .btn.ocr-btn:disabled{opacity:.6;cursor:default}
+#ocrLastResult{
+  font-family:'Courier New',monospace; font-size:12px; color:var(--ink-soft);
+}
+@media(max-width:700px){
+  .ocr-tools .btn{width:auto;flex:1}
+  #ocrLastResult{width:100%}
+}
+
+#ocrResultsPanel{
+  display:none; position:fixed; inset:0; z-index:160000; background:rgba(0,0,0,.72);
+  align-items:center; justify-content:center; padding:18px;
+}
+#ocrResultsPanel.open{display:flex}
+.ocr-results-card{
+  width:min(100%,480px); max-height:82vh; overflow-y:auto;
+  background:#FFFEFA; color:#2E2A22; border:1px solid #8B8168; border-radius:12px; padding:18px;
+  box-shadow:0 18px 50px rgba(0,0,0,.28);
+}
+.ocr-results-card h2{margin:0 0 6px;font:700 18px 'Courier New',monospace}
+.ocr-results-card p.ocr-hint{margin:0 0 14px;color:#6B6353;font-size:13px;line-height:1.4}
+.ocr-candidate{
+  display:flex; justify-content:space-between; align-items:center; gap:10px;
+  padding:10px 12px; border:1px solid var(--paper-line); border-radius:8px;
+  margin-bottom:8px; cursor:pointer; background:var(--card);
+}
+.ocr-candidate:hover{background:var(--paper-line)}
+.ocr-candidate .ocr-candidate-info{font-size:13px;line-height:1.4}
+.ocr-candidate .ocr-candidate-info strong{display:block;font-size:14px;word-break:break-word}
+.ocr-candidate .ocr-score{
+  font-family:'Courier New',monospace; font-size:11px; color:var(--stamp-green);
+  white-space:nowrap; font-weight:600;
+}
+.ocr-close-row{text-align:right;margin-top:10px}
+
 </style>
 </head>
 <body>
@@ -506,6 +548,10 @@
           <label for="barcodeColSelect">Barcode column</label>
           <select id="barcodeColSelect"></select>
         </div>
+        <div class="field">
+          <label for="poColSelect">PO / Pedido column</label>
+          <select id="poColSelect"></select>
+        </div>
         <button class="btn danger" id="resetBtn">Clear all progress</button>
         <button class="btn" id="testReportBtn">Send test report now</button>
       </div>
@@ -530,6 +576,13 @@
         </div>
         </div>
       </div>
+
+      <div class="ocr-tools">
+        <button class="btn ocr-btn" id="scanLabelBtn" type="button">Scan label (photo)</button>
+        <input type="file" id="labelPhotoInput" accept="image/*" capture="environment" style="display:none;">
+        <span id="ocrLastResult">No matching barcode? Take a photo of the whole label — PO number + description are read and matched automatically.</span>
+      </div>
+
       <div id="barcodeScannerPanel">
         <div class="barcode-camera-wrap">
           <div class="barcode-camera-actions">
@@ -537,6 +590,15 @@
           </div>
           <div id="barcodeReader"></div>
           <div id="barcodeScanStatus">Point the camera at one barcode.</div>
+        </div>
+      </div>
+
+      <div id="ocrResultsPanel">
+        <div class="ocr-results-card" role="dialog" aria-modal="true" aria-labelledby="ocrResultsTitle">
+          <h2 id="ocrResultsTitle">Possible matches</h2>
+          <p class="ocr-hint" id="ocrResultsHint">Tap the item this label belongs to.</p>
+          <div id="ocrCandidateList"></div>
+          <div class="ocr-close-row"><button class="btn" id="closeOcrResultsBtn" type="button">Cancel</button></div>
         </div>
       </div>
 
@@ -675,6 +737,7 @@ let rows = [];
 let tickColIndex = -1;
 let qtyColIndex = -1;
 let barcodeColIndex = -1;
+let poColIndex = -1;
 let rowKeys = [];
 let allTicks = {};
 let allNotes = {};
@@ -693,6 +756,7 @@ const rowCountEl = document.getElementById('rowCount');
 const colSelect = document.getElementById('colSelect');
 const qtyColSelect = document.getElementById('qtyColSelect');
 const barcodeColSelect = document.getElementById('barcodeColSelect');
+const poColSelect = document.getElementById('poColSelect');
 const resetBtn = document.getElementById('resetBtn');
 const changeFile = document.getElementById('changeFile');
 const progressLine = document.getElementById('progressLine');
@@ -819,10 +883,11 @@ async function applyParsedData(parsedHeaders, parsedRows, displayName){
   }
 }
 
-function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex){
+function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex, presetPoIndex){
   colSelect.innerHTML = '';
   qtyColSelect.innerHTML = '';
   barcodeColSelect.innerHTML = '';
+  poColSelect.innerHTML = '';
 
   const noneQtyOpt = document.createElement('option');
   noneQtyOpt.value = '-1';
@@ -833,6 +898,11 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex)
   noneBarcodeOpt.value = '-1';
   noneBarcodeOpt.textContent = '(select barcode column)';
   barcodeColSelect.appendChild(noneBarcodeOpt);
+
+  const nonePoOpt = document.createElement('option');
+  nonePoOpt.value = '-1';
+  nonePoOpt.textContent = '(select PO / pedido column)';
+  poColSelect.appendChild(nonePoOpt);
 
   headers.forEach((h, i) => {
     const opt1 = document.createElement('option');
@@ -849,6 +919,11 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex)
     opt3.value = i;
     opt3.textContent = h;
     barcodeColSelect.appendChild(opt3);
+
+    const opt4 = document.createElement('option');
+    opt4.value = i;
+    opt4.textContent = h;
+    poColSelect.appendChild(opt4);
   });
 
   if (typeof presetTickIndex === 'number'){
@@ -877,6 +952,16 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex)
   }
   barcodeColSelect.value = barcodeColIndex;
 
+  if (typeof presetPoIndex === 'number'){
+    poColIndex = presetPoIndex;
+  } else {
+    const poGuess = headers.findIndex(h =>
+      /pedido|\bpo\b|order|\bpp\b/i.test(h)
+    );
+    poColIndex = poGuess >= 0 ? poGuess : -1;
+  }
+  poColSelect.value = poColIndex;
+
   colSelect.onchange = async () => {
     tickColIndex = parseInt(colSelect.value, 10);
     const ok = await saveDataset();
@@ -891,6 +976,11 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex)
 
   barcodeColSelect.onchange = async () => {
     barcodeColIndex = parseInt(barcodeColSelect.value, 10);
+    await saveDataset();
+  };
+
+  poColSelect.onchange = async () => {
+    poColIndex = parseInt(poColSelect.value, 10);
     await saveDataset();
   };
 }
@@ -948,7 +1038,7 @@ async function saveDataset(){
     const res = await fetch('/api/dataset', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ headers, rows, tickColIndex, qtyColIndex, barcodeColIndex })
+      body: JSON.stringify({ headers, rows, tickColIndex, qtyColIndex, barcodeColIndex, poColIndex })
     });
     if (!res.ok){
       alert('Could not save the sheet. Please try again.');
@@ -1490,12 +1580,15 @@ async function init(){
     if (isAdmin){
       fileNameEl.textContent = '(current sheet)';
       rowCountEl.textContent = rows.length;
-      setupColumnSelects(state.tickColIndex, state.qtyColIndex, state.barcodeColIndex);
+      setupColumnSelects(state.tickColIndex, state.qtyColIndex, state.barcodeColIndex, state.poColIndex);
     } else {
       tickColIndex = state.tickColIndex;
       qtyColIndex = state.qtyColIndex;
       barcodeColIndex = typeof state.barcodeColIndex === 'number'
         ? state.barcodeColIndex
+        : -1;
+      poColIndex = typeof state.poColIndex === 'number'
+        ? state.poColIndex
         : -1;
     }
     buildKeys();
@@ -1806,6 +1899,211 @@ window.addEventListener('pagehide', () => {
   }
 });
 
+
+// =====================================================
+// LABEL PHOTO (OCR) MATCHING
+//
+// Some labels don't carry a barcode value that exists anywhere in the sheet —
+// the sheet only has the PO/pedido number and the item description. For
+// those, the camera takes one photo of the whole label, OCR reads the
+// printed text, and we score every row by PO number match + description
+// word overlap. OCR is never trusted to auto-tick: the best matches are
+// shown so the person scanning confirms the right one with a tap.
+// =====================================================
+let tesseractLoadPromise = null;
+
+function loadTesseract(){
+  if (window.Tesseract) return Promise.resolve();
+  if (tesseractLoadPromise) return tesseractLoadPromise;
+  tesseractLoadPromise = new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Could not load OCR library'));
+    document.head.appendChild(script);
+  });
+  return tesseractLoadPromise;
+}
+
+function stripAccents(value){
+  return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function ocrNormalizeText(value){
+  return stripAccents(value).toLowerCase();
+}
+
+function ocrTokens(value){
+  return ocrNormalizeText(value)
+    .split(/[^a-z0-9]+/)
+    .filter(t => t.length >= 3);
+}
+
+function extractPoCandidates(ocrText){
+  const matches = ocrText.match(/\d{4,}/g) || [];
+  return Array.from(new Set(matches));
+}
+
+function scoreRowAgainstOcr(row, ocrTokenSet, poCandidates){
+  let score = 0;
+
+  if (poColIndex >= 0){
+    const poValue = ocrNormalizeText(row[poColIndex]).trim();
+    if (poValue && poCandidates.includes(poValue)) score += 1000;
+  }
+
+  const rowTokens = new Set(ocrTokens(row.map(c => String(c ?? '')).join(' ')));
+  if (!rowTokens.size) return score;
+
+  let matched = 0;
+  rowTokens.forEach(token => { if (ocrTokenSet.has(token)) matched++; });
+
+  score += (matched / rowTokens.size) * 100;
+  return score;
+}
+
+function findLabelCandidates(ocrText){
+  const poCandidates = extractPoCandidates(ocrText);
+  const ocrTokenSet = new Set(ocrTokens(ocrText));
+
+  return rows
+    .map((row, index) => ({ index, score: scoreRowAgainstOcr(row, ocrTokenSet, poCandidates) }))
+    .filter(c => c.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
+async function applyRowIndexToChecklist(rowIndex){
+  const resultLabel = document.getElementById('ocrLastResult');
+  const key = rowKeys[rowIndex];
+  const expected = parseExpectedQty(rows[rowIndex]);
+  const existing = allTicks[key] || {};
+  const current = Number(existing.qty || 0);
+
+  if (current >= expected){
+    resultLabel.textContent = `Item already complete (${current}/${expected}).`;
+    return;
+  }
+
+  const newQty = qtyColIndex >= 0 ? Math.min(expected, current + 1) : 1;
+  const response = await saveTickSet(key, { ...existing, qty:newQty }, expected);
+
+  if (!response){
+    resultLabel.textContent = 'Could not save that match. Try again.';
+    return;
+  }
+
+  if (response.ticks) allTicks = response.ticks;
+  renderTable();
+  updateProgress();
+
+  if (response.allComplete) await maybeSendReport();
+
+  resultLabel.textContent = `Matched → ${newQty}/${expected}.`;
+  barcodeSuccessFeedback();
+}
+
+function renderOcrCandidates(candidates){
+  const list = document.getElementById('ocrCandidateList');
+  const hint = document.getElementById('ocrResultsHint');
+  list.innerHTML = '';
+
+  if (!candidates.length){
+    hint.textContent = 'No match found in the sheet. Try a clearer, closer photo, or check the item manually.';
+    return;
+  }
+
+  hint.textContent = 'Tap the item this label belongs to.';
+
+  candidates.forEach(({ index, score }) => {
+    const row = rows[index];
+    const item = document.createElement('div');
+    item.className = 'ocr-candidate';
+
+    const info = document.createElement('div');
+    info.className = 'ocr-candidate-info';
+    const title = document.createElement('strong');
+    title.textContent = row
+      .map(c => String(c ?? '').trim())
+      .filter(Boolean)
+      .join(' · ')
+      .slice(0, 160);
+    info.appendChild(title);
+    if (poColIndex >= 0 && row[poColIndex]){
+      const poLine = document.createElement('div');
+      poLine.textContent = 'PO: ' + row[poColIndex];
+      info.appendChild(poLine);
+    }
+
+    const scoreEl = document.createElement('span');
+    scoreEl.className = 'ocr-score';
+    scoreEl.textContent = score >= 1000 ? 'PO match' : 'text match';
+
+    item.appendChild(info);
+    item.appendChild(scoreEl);
+
+    item.addEventListener('click', async () => {
+      document.getElementById('ocrResultsPanel').classList.remove('open');
+      await applyRowIndexToChecklist(index);
+    });
+
+    list.appendChild(item);
+  });
+}
+
+async function handleLabelPhoto(file){
+  const resultLabel = document.getElementById('ocrLastResult');
+  const scanBtn = document.getElementById('scanLabelBtn');
+
+  if (poColIndex < 0 && !confirm('No PO/Pedido column is configured — matching will rely only on text similarity, which is less reliable. Continue anyway?')){
+    return;
+  }
+
+  scanBtn.disabled = true;
+  resultLabel.textContent = 'Loading OCR engine…';
+
+  try{
+    await loadTesseract();
+    resultLabel.textContent = 'Reading label…';
+
+    const { data } = await Tesseract.recognize(file, 'por+eng');
+    const ocrText = ocrNormalizeText(data.text || '');
+
+    if (!ocrText.trim()){
+      resultLabel.textContent = 'Could not read any text on that photo. Try again with better light/focus.';
+      return;
+    }
+
+    const candidates = findLabelCandidates(ocrText);
+    renderOcrCandidates(candidates);
+    document.getElementById('ocrResultsPanel').classList.add('open');
+    resultLabel.textContent = candidates.length
+      ? `Found ${candidates.length} possible match(es).`
+      : 'No match found in the sheet.';
+  }catch(err){
+    console.error('OCR failed', err);
+    resultLabel.textContent = 'Could not read that photo. Try again.';
+  }finally{
+    scanBtn.disabled = false;
+  }
+}
+
+const scanLabelBtn = document.getElementById('scanLabelBtn');
+const labelPhotoInput = document.getElementById('labelPhotoInput');
+if (scanLabelBtn && labelPhotoInput){
+  scanLabelBtn.addEventListener('click', () => labelPhotoInput.click());
+  labelPhotoInput.addEventListener('change', e => {
+    if (e.target.files && e.target.files[0]) handleLabelPhoto(e.target.files[0]);
+    labelPhotoInput.value = '';
+  });
+}
+
+const closeOcrResultsBtn = document.getElementById('closeOcrResultsBtn');
+if (closeOcrResultsBtn){
+  closeOcrResultsBtn.addEventListener('click', () => {
+    document.getElementById('ocrResultsPanel').classList.remove('open');
+  });
+}
 
 
 // =====================================================
