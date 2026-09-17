@@ -461,31 +461,17 @@
   #ocrLastResult{width:100%}
 }
 
-#ocrResultsPanel{
-  display:none; position:fixed; inset:0; z-index:160000; background:rgba(0,0,0,.72);
-  align-items:center; justify-content:center; padding:18px;
+#ocrScannerPanel{
+  display:none; position:fixed; inset:0; z-index:150000; background:rgba(0,0,0,.86);
+  align-items:flex-start; justify-content:center; padding-top:0;
 }
-#ocrResultsPanel.open{display:flex}
-.ocr-results-card{
-  width:min(100%,480px); max-height:82vh; overflow-y:auto;
-  background:#FFFEFA; color:#2E2A22; border:1px solid #8B8168; border-radius:12px; padding:18px;
-  box-shadow:0 18px 50px rgba(0,0,0,.28);
+#ocrScannerPanel.open{display:flex}
+#ocrVideo{width:100%!important;height:100%!important;object-fit:cover;display:block}
+#ocrScanStatus{
+  position:absolute; left:10px; right:10px; bottom:8px; z-index:150002;
+  padding:7px 10px; border-radius:6px; background:rgba(0,0,0,.72);
+  color:#fff; text-align:center; font-size:12px;
 }
-.ocr-results-card h2{margin:0 0 6px;font:700 18px 'Courier New',monospace}
-.ocr-results-card p.ocr-hint{margin:0 0 14px;color:#6B6353;font-size:13px;line-height:1.4}
-.ocr-candidate{
-  display:flex; justify-content:space-between; align-items:center; gap:10px;
-  padding:10px 12px; border:1px solid var(--paper-line); border-radius:8px;
-  margin-bottom:8px; cursor:pointer; background:var(--card);
-}
-.ocr-candidate:hover{background:var(--paper-line)}
-.ocr-candidate .ocr-candidate-info{font-size:13px;line-height:1.4}
-.ocr-candidate .ocr-candidate-info strong{display:block;font-size:14px;word-break:break-word}
-.ocr-candidate .ocr-score{
-  font-family:'Courier New',monospace; font-size:11px; color:var(--stamp-green);
-  white-space:nowrap; font-weight:600;
-}
-.ocr-close-row{text-align:right;margin-top:10px}
 
 </style>
 </head>
@@ -545,11 +531,11 @@
           <select id="qtyColSelect"></select>
         </div>
         <div class="field">
-          <label for="barcodeColSelect">Barcode column</label>
+          <label for="barcodeColSelect">Barcode / product number column</label>
           <select id="barcodeColSelect"></select>
         </div>
         <div class="field">
-          <label for="poColSelect">PO / Purchase column</label>
+          <label for="poColSelect">PO / Pedido column</label>
           <select id="poColSelect"></select>
         </div>
         <button class="btn danger" id="resetBtn">Clear all progress</button>
@@ -578,9 +564,8 @@
       </div>
 
       <div class="ocr-tools">
-        <button class="btn ocr-btn" id="scanLabelBtn" type="button">Scan label (photo)</button>
-        <input type="file" id="labelPhotoInput" accept="image/*" capture="environment" style="display:none;">
-        <span id="ocrLastResult">No matching barcode? Take a photo of the whole label — PO number + description are read and matched automatically.</span>
+        <button class="btn ocr-btn" id="scanLabelBtn" type="button">Scan label (PP / product number)</button>
+        <span id="ocrLastResult">No matching barcode? Scan the label instead — it keeps reading until it finds the PP number or 12-digit product number, then ticks and closes automatically.</span>
       </div>
 
       <div id="barcodeScannerPanel">
@@ -593,12 +578,13 @@
         </div>
       </div>
 
-      <div id="ocrResultsPanel">
-        <div class="ocr-results-card" role="dialog" aria-modal="true" aria-labelledby="ocrResultsTitle">
-          <h2 id="ocrResultsTitle">Possible matches</h2>
-          <p class="ocr-hint" id="ocrResultsHint">Tap the item this label belongs to.</p>
-          <div id="ocrCandidateList"></div>
-          <div class="ocr-close-row"><button class="btn" id="closeOcrResultsBtn" type="button">Cancel</button></div>
+      <div id="ocrScannerPanel">
+        <div class="barcode-camera-wrap">
+          <div class="barcode-camera-actions">
+            <button class="btn" id="closeOcrScannerBtn" type="button">Close</button>
+          </div>
+          <video id="ocrVideo" autoplay playsinline muted></video>
+          <div id="ocrScanStatus">Point the camera at the PP number and product number.</div>
         </div>
       </div>
 
@@ -902,7 +888,7 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex,
 
   const nonePoOpt = document.createElement('option');
   nonePoOpt.value = '-1';
-  nonePoOpt.textContent = '(select PO / purchase column)';
+  nonePoOpt.textContent = '(select PO / pedido column)';
   poColSelect.appendChild(nonePoOpt);
 
   headers.forEach((h, i) => {
@@ -957,7 +943,7 @@ function setupColumnSelects(presetTickIndex, presetQtyIndex, presetBarcodeIndex,
     poColIndex = presetPoIndex;
   } else {
     const poGuess = headers.findIndex(h =>
-      /purchase|\bpo\b|order|\bpp\b/i.test(h)
+      /pedido|\bpo\b|order|\bpp\b/i.test(h)
     );
     poColIndex = poGuess >= 0 ? poGuess : -1;
   }
@@ -1903,14 +1889,23 @@ window.addEventListener('pagehide', () => {
 
 
 // =====================================================
-// LABEL PHOTO (OCR) MATCHING
+// LABEL OCR SCANNER — live camera, same auto-close behavior as the
+// barcode scanner.
 //
-// Some labels don't carry a barcode value that exists anywhere in the sheet —
-// the sheet only has the PO/purchase number and the item description. For
-// those, the camera takes one photo of the whole label, OCR reads the
-// printed text, and we score every row by PO number match + description
-// word overlap. OCR is never trusted to auto-tick: the best matches are
-// shown so the person scanning confirms the right one with a tap.
+// Some labels don't carry a barcode value that exists anywhere in the
+// sheet. What they do carry, printed as text, is:
+//   - a PP/pedido number, e.g. "PP-0123456"
+//   - a 12-digit product number near the item description
+// The camera stays open and re-reads the frame roughly once a second
+// (throttled by a busy-lock, since each OCR pass takes a few hundred ms
+// to ~1.5s). The product number is matched against the same "Barcode /
+// product number" column the physical barcode scanner already uses — a
+// 12-digit code read off the label this way is exactly as trustworthy as
+// one decoded from an actual barcode, so it auto-ticks and closes the
+// camera immediately, same as a successful barcode scan. The PP number is
+// a weaker signal on its own (one order can cover several items), so it
+// only auto-ticks when it narrows the sheet down to exactly one item from
+// that order that's still open.
 // =====================================================
 let tesseractLoadPromise = null;
 
@@ -1943,10 +1938,12 @@ function withTimeout(promise, ms, message){
 let ocrWorkerPromise = null;
 
 function updateOcrProgressUI(m){
-  const el = document.getElementById('ocrLastResult');
-  if (!el || !m || !m.status) return;
+  if (!m || !m.status) return;
+  const panel = document.getElementById('ocrScannerPanel');
+  const el = document.getElementById(panel && panel.classList.contains('open') ? 'ocrScanStatus' : 'ocrLastResult');
+  if (!el) return;
   if (m.status === 'recognizing text' && typeof m.progress === 'number'){
-    el.textContent = `Reading label… ${Math.round(m.progress * 100)}%`;
+    el.textContent = `Reading… ${Math.round(m.progress * 100)}%`;
   } else if (/loading|loaded|initializ/i.test(m.status)){
     el.textContent = 'Loading OCR engine (first scan only)…';
   }
@@ -1977,68 +1974,6 @@ function warmUpOcr(){
   getOcrWorker().catch(err => console.warn('OCR warm-up failed', err));
 }
 
-// Phone photos routinely come in at 3000-4000px on the long side; OCR time
-// grows roughly with pixel count, so recognizing that untouched is the
-// single biggest source of slowness. Downscaling to a print-legible size
-// and stretching contrast (faded/glossy labels are low-contrast under
-// phone flash) cuts recognition time dramatically and usually improves
-// accuracy at the same time.
-function preprocessLabelImage(file, maxDim = 1500){
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      try{
-        const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
-        const w = Math.max(1, Math.round(img.naturalWidth * scale));
-        const h = Math.max(1, Math.round(img.naturalHeight * scale));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, w, h);
-
-        const imageData = ctx.getImageData(0, 0, w, h);
-        const pixels = imageData.data;
-
-        let min = 255, max = 0;
-        const gray = new Uint8ClampedArray(w * h);
-        for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
-          const g = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
-          gray[p] = g;
-          if (g < min) min = g;
-          if (g > max) max = g;
-        }
-
-        const range = Math.max(1, max - min);
-        for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
-          const stretched = ((gray[p] - min) / range) * 255;
-          pixels[i] = pixels[i + 1] = pixels[i + 2] = stretched;
-        }
-
-        ctx.putImageData(imageData, 0, 0);
-        canvas.toBlob(
-          blob => blob ? resolve(blob) : reject(new Error('Could not process photo')),
-          'image/jpeg',
-          0.92
-        );
-      }catch(err){
-        reject(err);
-      }
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Could not load photo'));
-    };
-
-    img.src = url;
-  });
-}
-
 function stripAccents(value){
   return String(value ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
@@ -2047,59 +1982,65 @@ function ocrNormalizeText(value){
   return stripAccents(value).toLowerCase();
 }
 
-function ocrTokens(value){
-  return ocrNormalizeText(value)
-    .split(/[^a-z0-9]+/)
-    .filter(t => t.length >= 3);
+function normalizeDigitsOnly(value){
+  return String(value ?? '').replace(/\D/g, '').replace(/^0+(?=\d)/, '');
 }
 
-function extractPoCandidates(ocrText){
-  const matches = ocrText.match(/\d{4,}/g) || [];
+// PP-0123456, "PP 0123456", "pp0123456"… the leading zero after PP is
+// dropped here since sheets normally store the PO without it.
+function extractPpNumber(ocrText){
+  const m = ocrText.match(/pp[\s\-]*0?(\d{5,9})/i);
+  return m ? m[1] : null;
+}
+
+// The product number is printed as a plain 12-digit run near the
+// description — no prefix to anchor on, so every 12-digit run is a
+// candidate and each is checked against the sheet.
+function extractProductNumbers(ocrText){
+  const matches = ocrText.match(/\d{12}/g) || [];
   return Array.from(new Set(matches));
 }
 
-function extractDigitStream(ocrText){
-  return ocrText.replace(/[^0-9]/g, '');
-}
+let ocrFrameCanvas = null;
 
-function scoreRowAgainstOcr(row, ocrTokenSet, poCandidates, digitStream){
-  let score = 0;
+// Downscaled harder than the old single-photo flow (900px vs 1500px) on
+// purpose: this runs repeatedly against a live feed, so each pass needs to
+// be as fast as possible rather than as detailed as possible — get closer
+// to the label instead to keep the printed numbers legible at this size.
+function captureFrameForOcr(video, maxDim = 900){
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return null;
 
-  if (poColIndex >= 0){
-    const poValue = ocrNormalizeText(row[poColIndex]).trim();
-    if (poValue){
-      if (poCandidates.includes(poValue)){
-        // A clean, isolated match of the PO number as its own token.
-        score += 1000;
-      } else if (poValue.length >= 4 && digitStream.includes(poValue)){
-        // OCR often runs the PO number together with a neighboring label/
-        // barcode digit, so also accept it as a substring of every digit
-        // read off the label, just scored lower than a clean match.
-        score += 700;
-      }
-    }
+  const scale = Math.min(1, maxDim / Math.max(vw, vh));
+  const w = Math.max(1, Math.round(vw * scale));
+  const h = Math.max(1, Math.round(vh * scale));
+
+  if (!ocrFrameCanvas) ocrFrameCanvas = document.createElement('canvas');
+  ocrFrameCanvas.width = w;
+  ocrFrameCanvas.height = h;
+  const ctx = ocrFrameCanvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, w, h);
+
+  const imageData = ctx.getImageData(0, 0, w, h);
+  const pixels = imageData.data;
+
+  let min = 255, max = 0;
+  const gray = new Uint8ClampedArray(w * h);
+  for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
+    const g = pixels[i] * 0.299 + pixels[i + 1] * 0.587 + pixels[i + 2] * 0.114;
+    gray[p] = g;
+    if (g < min) min = g;
+    if (g > max) max = g;
   }
 
-  const rowTokens = new Set(ocrTokens(row.map(c => String(c ?? '')).join(' ')));
-  if (!rowTokens.size) return score;
+  const range = Math.max(1, max - min);
+  for (let i = 0, p = 0; i < pixels.length; i += 4, p++){
+    const stretched = ((gray[p] - min) / range) * 255;
+    pixels[i] = pixels[i + 1] = pixels[i + 2] = stretched;
+  }
 
-  let matched = 0;
-  rowTokens.forEach(token => { if (ocrTokenSet.has(token)) matched++; });
-
-  score += (matched / rowTokens.size) * 100;
-  return score;
-}
-
-function findLabelCandidates(ocrText){
-  const poCandidates = extractPoCandidates(ocrText);
-  const digitStream = extractDigitStream(ocrText);
-  const ocrTokenSet = new Set(ocrTokens(ocrText));
-
-  return rows
-    .map((row, index) => ({ index, score: scoreRowAgainstOcr(row, ocrTokenSet, poCandidates, digitStream) }))
-    .filter(c => c.score > 0)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 5);
+  ctx.putImageData(imageData, 0, 0);
+  return ocrFrameCanvas;
 }
 
 async function applyRowIndexToChecklist(rowIndex){
@@ -2111,7 +2052,7 @@ async function applyRowIndexToChecklist(rowIndex){
 
   if (current >= expected){
     resultLabel.textContent = `Item already complete (${current}/${expected}).`;
-    return;
+    return { ok:true, alreadyComplete:true };
   }
 
   const newQty = qtyColIndex >= 0 ? Math.min(expected, current + 1) : 1;
@@ -2119,7 +2060,7 @@ async function applyRowIndexToChecklist(rowIndex){
 
   if (!response){
     resultLabel.textContent = 'Could not save that match. Try again.';
-    return;
+    return { ok:false };
   }
 
   if (response.ticks) allTicks = response.ticks;
@@ -2130,120 +2071,167 @@ async function applyRowIndexToChecklist(rowIndex){
 
   resultLabel.textContent = `Matched → ${newQty}/${expected}.`;
   barcodeSuccessFeedback();
+  return { ok:true };
 }
 
-function renderOcrCandidates(candidates){
-  const list = document.getElementById('ocrCandidateList');
-  const hint = document.getElementById('ocrResultsHint');
-  list.innerHTML = '';
+let ocrScanStream = null;
+let ocrScanVideo = null;
+let ocrScanRunning = false;
+let ocrScanBusy = false;
+let ocrScanTimer = null;
 
-  if (!candidates.length){
-    hint.textContent = 'No match found in the sheet. Try a clearer, closer photo, or check the item manually.';
-    return;
-  }
+async function runOcrScanPass(){
+  if (!ocrScanRunning || ocrScanBusy) return;
+  const video = ocrScanVideo;
+  if (!video || video.readyState < 2) return;
 
-  hint.textContent = 'Tap the item this label belongs to.';
-
-  candidates.forEach(({ index, score }) => {
-    const row = rows[index];
-    const item = document.createElement('div');
-    item.className = 'ocr-candidate';
-
-    const info = document.createElement('div');
-    info.className = 'ocr-candidate-info';
-    const title = document.createElement('strong');
-    title.textContent = row
-      .map(c => String(c ?? '').trim())
-      .filter(Boolean)
-      .join(' · ')
-      .slice(0, 160);
-    info.appendChild(title);
-    if (poColIndex >= 0 && row[poColIndex]){
-      const poLine = document.createElement('div');
-      poLine.textContent = 'PO: ' + row[poColIndex];
-      info.appendChild(poLine);
-    }
-
-    const scoreEl = document.createElement('span');
-    scoreEl.className = 'ocr-score';
-    scoreEl.textContent = score >= 1000 ? 'PO match' : (score >= 700 ? 'PO match (fuzzy)' : 'text match');
-
-    item.appendChild(info);
-    item.appendChild(scoreEl);
-
-    item.addEventListener('click', async () => {
-      document.getElementById('ocrResultsPanel').classList.remove('open');
-      await applyRowIndexToChecklist(index);
-    });
-
-    list.appendChild(item);
-  });
-}
-
-async function handleLabelPhoto(file){
-  const resultLabel = document.getElementById('ocrLastResult');
-  const scanBtn = document.getElementById('scanLabelBtn');
-
-  if (poColIndex < 0 && !confirm('No PO/Purchase column is configured — matching will rely only on text similarity, which is less reliable. Continue anyway?')){
-    return;
-  }
-
-  scanBtn.disabled = true;
-  resultLabel.textContent = 'Preparing photo…';
+  ocrScanBusy = true;
+  const statusEl = document.getElementById('ocrScanStatus');
 
   try{
-    const processedImage = await preprocessLabelImage(file);
+    const frame = captureFrameForOcr(video);
+    if (!frame) return;
 
-    resultLabel.textContent = 'Loading OCR engine…';
-    const worker = await withTimeout(
+    const worker = await getOcrWorker();
+    const { data } = await worker.recognize(frame);
+    const ocrText = ocrNormalizeText(data.text || '');
+    if (!ocrText.trim()) return;
+
+    // Strongest signal: a 12-digit product number is exactly as unique as a
+    // decoded barcode, so it reuses the same matching + ticking path the
+    // physical barcode scanner already uses (including its "prefer a row
+    // that still needs quantity" tie-break for a code repeated in the sheet).
+    const productCandidates = extractProductNumbers(ocrText);
+    for (const code of productCandidates){
+      if (findRowByBarcode(code) < 0) continue;
+
+      if (statusEl) statusEl.textContent = 'Matched product number: ' + code;
+      const result = await applyBarcodeToChecklist(code);
+      if (result && result.ok){
+        await stopLabelOcrScanner();
+        return;
+      }
+    }
+
+    // Weaker signal: a PP/pedido number can cover several items in the
+    // sheet, so it only auto-ticks when it narrows things down to exactly
+    // one item from that order that's still open — otherwise it's too
+    // ambiguous to act on without the product number.
+    const ppNumber = extractPpNumber(ocrText);
+    if (ppNumber && poColIndex >= 0){
+      const openMatches = rows
+        .map((row, index) => ({ row, index }))
+        .filter(({ row }) => normalizeDigitsOnly(row[poColIndex]) === ppNumber)
+        .filter(({ index }) => {
+          const expected = parseExpectedQty(rows[index]);
+          const tick = allTicks[rowKeys[index]];
+          const current = tick ? Number(tick.qty || 0) : 0;
+          return current < expected;
+        });
+
+      if (openMatches.length === 1){
+        if (statusEl) statusEl.textContent = 'PP ' + ppNumber + ' → single open item matched.';
+        const result = await applyRowIndexToChecklist(openMatches[0].index);
+        if (result && result.ok){
+          await stopLabelOcrScanner();
+          return;
+        }
+      }
+    }
+
+    if (statusEl){
+      const readBits = [
+        ppNumber ? 'PP ' + ppNumber : null,
+        productCandidates.length ? productCandidates.join(', ') : null
+      ].filter(Boolean);
+      statusEl.textContent = readBits.length
+        ? 'Read ' + readBits.join(' · ') + ' — no match yet, keep steady…'
+        : 'Scanning… point at the PP number and product number.';
+    }
+  }catch(err){
+    console.error('OCR scan pass failed', err);
+  }finally{
+    ocrScanBusy = false;
+  }
+}
+
+async function startLabelOcrScanner(){
+  if (ocrScanRunning) return;
+
+  if (barcodeColIndex < 0 && poColIndex < 0){
+    document.getElementById('ocrLastResult').textContent =
+      'Configure the Barcode/product number column and/or PO column first (admin link).';
+    return;
+  }
+
+  const panel = document.getElementById('ocrScannerPanel');
+  const status = document.getElementById('ocrScanStatus');
+  const video = document.getElementById('ocrVideo');
+
+  panel.classList.add('open');
+  status.textContent = 'Starting camera…';
+
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:'environment', width:{ ideal:1280 }, height:{ ideal:720 } },
+      audio:false
+    });
+
+    ocrScanStream = stream;
+    ocrScanVideo = video;
+    video.srcObject = stream;
+    await video.play();
+
+    status.textContent = 'Loading OCR engine…';
+    await withTimeout(
       getOcrWorker(),
       25000,
       'OCR engine took too long to load — check your connection and try again.'
     );
 
-    resultLabel.textContent = 'Reading label…';
-    const { data } = await withTimeout(
-      worker.recognize(processedImage),
-      20000,
-      'Reading the label took too long — try again with a steadier, closer photo.'
-    );
-    const ocrText = ocrNormalizeText(data.text || '');
-
-    if (!ocrText.trim()){
-      resultLabel.textContent = 'Could not read any text on that photo. Get closer, fill the frame with the label, and avoid glare.';
-      return;
-    }
-
-    const candidates = findLabelCandidates(ocrText);
-    renderOcrCandidates(candidates);
-    document.getElementById('ocrResultsPanel').classList.add('open');
-    resultLabel.textContent = candidates.length
-      ? `Found ${candidates.length} possible match(es).`
-      : 'No match found in the sheet.';
+    ocrScanRunning = true;
+    status.textContent = 'Point the camera at the PP number and product number.';
+    ocrScanTimer = setInterval(runOcrScanPass, 900);
   }catch(err){
-    console.error('OCR failed', err);
-    resultLabel.textContent = (err && err.message) || 'Could not read that photo. Try again.';
-  }finally{
-    scanBtn.disabled = false;
+    console.error('Could not start OCR camera', err);
+    status.textContent = (err && err.message) || 'Camera could not start. Check camera permission.';
+    await stopLabelOcrScanner();
   }
 }
 
-const scanLabelBtn = document.getElementById('scanLabelBtn');
-const labelPhotoInput = document.getElementById('labelPhotoInput');
-if (scanLabelBtn && labelPhotoInput){
-  scanLabelBtn.addEventListener('click', () => labelPhotoInput.click());
-  labelPhotoInput.addEventListener('change', e => {
-    if (e.target.files && e.target.files[0]) handleLabelPhoto(e.target.files[0]);
-    labelPhotoInput.value = '';
-  });
+async function stopLabelOcrScanner(){
+  ocrScanRunning = false;
+  ocrScanBusy = false;
+
+  if (ocrScanTimer){
+    clearInterval(ocrScanTimer);
+    ocrScanTimer = null;
+  }
+
+  if (ocrScanStream){
+    ocrScanStream.getTracks().forEach(t => t.stop());
+    ocrScanStream = null;
+  }
+
+  const video = document.getElementById('ocrVideo');
+  if (video){
+    video.pause();
+    video.srcObject = null;
+  }
+  ocrScanVideo = null;
+
+  document.getElementById('ocrScannerPanel').classList.remove('open');
 }
 
-const closeOcrResultsBtn = document.getElementById('closeOcrResultsBtn');
-if (closeOcrResultsBtn){
-  closeOcrResultsBtn.addEventListener('click', () => {
-    document.getElementById('ocrResultsPanel').classList.remove('open');
-  });
-}
+const scanLabelBtn = document.getElementById('scanLabelBtn');
+if (scanLabelBtn) scanLabelBtn.addEventListener('click', startLabelOcrScanner);
+
+const closeOcrScannerBtn = document.getElementById('closeOcrScannerBtn');
+if (closeOcrScannerBtn) closeOcrScannerBtn.addEventListener('click', stopLabelOcrScanner);
+
+window.addEventListener('pagehide', () => {
+  if (ocrScanRunning) stopLabelOcrScanner();
+});
 
 
 // =====================================================
